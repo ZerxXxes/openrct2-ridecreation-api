@@ -1,299 +1,333 @@
-// ---------------------------------------------------------------------------
-//  Utility / Command Functions
-// ---------------------------------------------------------------------------
+function main() {
+    "use strict";
 
-function findRideById(rideId)
-{
-    var found = null;
-    map.rides.forEach(function(ride) {
-        if (ride.id === rideId)
-        {
-            found = ride;
-        }
-    });
-    return found;
-}
-
-/**
- * Function to list all rides.
- */
-function listAllRides()
-{
-    // map.rides is an array-like of Ride objects.
-    var ridesArray = [];
-    map.rides.forEach(function(ride) {
-        ridesArray.push({
-            id: ride.id,
-            name: ride.name,
-            type: ride.type
-        });
-    });
-
-    if (ridesArray.length === 0)
-    {
-        return {
-            success: true,
-            message: "No rides found in this park.",
-            rides: []
-        };
-    }
-
-    return {
-        success: true,
-        message: "Found " + ridesArray.length + " ride(s).",
-        rides: ridesArray
-    };
-}
-
-function deleteAllRides()
-{
-    try
-    {
-        map.rides.forEach(function(ride) 
-        {
-            context.executeAction("ridedemolish", {
-                ride: ride.id,
-                modifyType: 0 // 0 => demolish, 1 => renew
-            });
-        });
-
-        return { success: true, message: "All rides have been demolished." };
-    }
-    catch (e)
-    {
-        return { success: false, message: "Failed to demolish rides: " + e.message };
-    }
-}
-
-/**
- * Function to start a ride in test mode (status = 2).
- */
-function startRideTest(rideId)
-{
-    var ride = findRideById(rideId);
-    if (!ride)
-    {
-        return {
-            success: false,
-            message: "Ride with ID " + rideId + " not found."
-        };
-    }
-
-    try
-    {
-        // Use the correct action name: "ridesetstatus"
-        context.executeAction("ridesetstatus", {
-            ride: rideId,
-            status: 2 // 2 => testing
-        });
-
-        return {
-            success: true,
-            message: "Ride started in test mode."
-        };
-    }
-    catch (e)
-    {
-        return {
-            success: false,
-            message: "Failed to start ride in test mode: " + e.message
-        };
-    }
-}
-
-/**
- * Function to get a rides stats
- */
-
-function getRideStats(rideId)
-{
-    var ride = findRideById(rideId);
-    if (!ride)
-    {
-        return {
-            success: false,
-            message: "Ride with ID " + rideId + " not found."
-        };
-    }
-
-    try
-    {
-        // -1 for excitement often indicates "no stats computed yet."
-        // If it’s not -1, it’s typically stored as a two-decimal integer (e.g., 652 => 6.52).
-        var e = ride.excitement;  // -1 or integer
-        var i = ride.intensity;   // 0 or integer
-        var n = ride.nausea;      // 0 or integer
-
-        // Convert any non-negative values from "fixed two-decimal integer" to a float.
-        // If it's -1, you can interpret that as “no stats”.
-        var excitement = (e >= 0) ? (e / 100.0) : null;
-        var intensity  = (i >= 0) ? (i / 100.0) : null;
-        var nausea     = (n >= 0) ? (n / 100.0) : null;
-
-        return {
-            success: true,
-            message: "Ride stats fetched successfully.",
-            stats: {
-                excitement: excitement,
-                intensity: intensity,
-                nausea: nausea
-            }
-        };
-    }
-    catch (e)
-    {
-        return {
-            success: false,
-            message: "Failed to fetch ride stats: " + e.message
-        };
-    }
-}
-
-/**
- * Dump all (enumerable) properties on the ride object as JSON so we can see
- * what fields actually exist. 
- */
-function dumpRideObject(rideId)
-{
-    var ride = findRideById(rideId);
-    if (!ride)
-    {
-        return {
-            success: false,
-            message: "Ride with ID " + rideId + " not found."
-        };
-    }
-
-    // Attempt to enumerate properties
-    try
-    {
-        var rideData = {};
-        for (var key in ride)
-        {
-            // If ride[key] is inaccessible or throws, catch it
-            try
-            {
-                var val = ride[key];
-                rideData[key] = val;
-            }
-            catch (err)
-            {
-                rideData[key] = "Error accessing property: " + err.message;
-            }
-        }
-
-        return {
-            success: true,
-            message: "Ride object dump successful.",
-            rideDump: rideData
-        };
-    }
-    catch (e)
-    {
-        return {
-            success: false,
-            message: "Failed to dump ride object: " + e.message
-        };
-    }
-}
-
-// ---------------------------------------------------------------------------
-//  Command Dispatch
-// ---------------------------------------------------------------------------
-
-/**
- * Parses a single JSON command string, executes the corresponding function, 
- * and returns a JSON string with the result.
- * 
- * @param {string} data - the raw JSON string from the socket
- * @returns {string} - a JSON-encoded string of the result
- */
-function handleIncomingCommand(data)
-{
-    var response;
-    try
-    {
-        var parsed = JSON.parse(data);
-
-        switch (parsed.command)
-        {
-            case "listAllRides":
-                response = listAllRides();
-                break;
-
-            case "deleteAllRides":
-                response = deleteAllRides();
-                break;
-
-            case "startRideTest":
-                response = startRideTest(parsed.rideId);
-                break;
-
-            case "getRideStats":
-                response = getRideStats(parsed.rideId);
-                break;
-
-            case "dumpRideObject":
-                response = dumpRideObject(parsed.rideId);
-                break;
-
-            default:
-                response = {
-                    success: false,
-                    message: "Unknown command: " + parsed.command
-                };
-        }
-    }
-    catch (err)
-    {
-        response = {
-            success: false,
-            message: "Error parsing/handling command: " + err
-        };
-    }
-
-    // Return a JSON-formatted reply
-    return JSON.stringify(response);
-}
-
-// ---------------------------------------------------------------------------
-//  Main Plugin Initialization
-// ---------------------------------------------------------------------------
-
-function main()
-{
-    // Create a local TCP server listening on port 8080
+    // Create a TCP listener on port 8080
     var server = network.createListener();
 
-    server.on("connection", function(conn)
-    {
+    server.on("connection", function (conn) {
         var buffer = "";
 
-        conn.on("data", function(dataChunk)
-        {
-            // Convert to string, accumulate
-            buffer += dataChunk.toString();
-
-            // Split on newline to find complete JSON messages
+        // Handle incoming data on this connection.
+        conn.on("data", function (data) {
+            buffer += data;
+            // Split messages on newline; we assume one JSON blob per line.
             var lines = buffer.split("\n");
-            buffer = lines.pop(); // Keep the trailing incomplete line
+            // If the last element is not empty, it means the last line is incomplete.
+            if (lines[lines.length - 1] !== "") {
+                buffer = lines.pop();
+            } else {
+                // All lines complete; clear the buffer.
+                buffer = "";
+                // Remove the empty string after the trailing newline.
+                lines.pop();
+            }
 
-            // Process each complete line
-            lines.forEach(function(line)
-            {
-                var trimmed = line.trim();
-                if (trimmed.length > 0)
-                {
-                    var reply = handleIncomingCommand(trimmed);
-                    // Send reply back, plus newline
-                    conn.write(reply + "\n");
-                }
-            });
+            // Process each complete JSON message.
+            for (var i = 0; i < lines.length; i++) {
+                (function(line) {
+                    var request;
+                    try {
+                        request = JSON.parse(line);
+                    } catch (e) {
+                        conn.write(JSON.stringify({
+                            success: false,
+                            error: "Invalid JSON"
+                        }) + "\n");
+                        return;
+                    }
+
+                    processRequest(request, function (response) {
+                        // Send the response as a JSON blob followed by a newline.
+                        conn.write(JSON.stringify(response) + "\n");
+                    });
+                })(lines[i]);
+            }
         });
     });
 
     server.listen(8080);
-    console.log("Socket JSON Plugin: Listening on port 8080...");
+    console.log("Ride API server listening on port 8080.");
+
+    /**
+     * Processes a request object and calls the callback with the response.
+     *
+     * Supported endpoints include:
+     * - listAllRides
+     * - deleteAllRides
+     * - startRideTest
+     * - getRideStats
+     * - createRide
+     * - placeTrackPiece
+     * - getTrackCircuit (new endpoint that takes a rideId)
+     *
+     * @param {Object} request - The parsed JSON request.
+     * @param {Function} callback - The function to call with the response.
+     */
+    function processRequest(request, callback) {
+        if (!request.endpoint) {
+            callback({
+                success: false,
+                error: "Missing endpoint"
+            });
+            return;
+        }
+
+        switch (request.endpoint) {
+            case "listAllRides":
+                var ridesArray = [];
+                map.rides.forEach(function (ride) {
+                    ridesArray.push({
+                        id: ride.id,
+                        name: ride.name,
+                        type: ride.type
+                    });
+                });
+                callback({
+                    success: true,
+                    payload: ridesArray
+                });
+                break;
+            
+            case "getAllTrackSegments":
+                // Retrieve all available track segments.
+                var segments = context.getAllTrackSegments();
+                var result = segments.map(function(seg) {
+                    return {
+                        type: seg.type,
+                        description: seg.description,
+                        trackGroup: seg.trackGroup,
+                        length: seg.length
+                    };
+                });
+                callback({
+                    success: true,
+                    payload: result
+                });
+                break;
+
+            case "deleteAllRides":
+                var ridesToDelete = [];
+                map.rides.forEach(function (ride) {
+                    ridesToDelete.push(ride);
+                });
+                if (ridesToDelete.length === 0) {
+                    callback({
+                        success: true,
+                        payload: "No rides to delete."
+                    });
+                    return;
+                }
+                function deleteNext() {
+                    if (ridesToDelete.length === 0) {
+                        callback({
+                            success: true,
+                            payload: "Deleted all rides."
+                        });
+                        return;
+                    }
+                    var ride = ridesToDelete.shift();
+                    context.executeAction("ridedemolish", {
+                        ride: ride.id,
+                        modifyType: 0  // 0 means demolish.
+                    }, function (result) {
+                        if (!result || (result.error && result.error !== "")) {
+                            console.log("Error demolishing ride " + ride.id + ": " + (result && result.error ? result.error : "Unknown error"));
+                        }
+                        deleteNext();
+                    });
+                }
+                deleteNext();
+                break;
+
+            case "startRideTest":
+                if (!request.params || typeof request.params.rideId !== "number") {
+                    callback({
+                        success: false,
+                        error: "Missing or invalid parameter: rideId"
+                    });
+                    return;
+                }
+                var rideId = request.params.rideId;
+                context.executeAction("ridesetstatus", {
+                    ride: rideId,
+                    status: 2 // 2 means testing.
+                }, function (result) {
+                    if (!result || (result.error && result.error !== "")) {
+                        callback({
+                            success: false,
+                            error: "Failed to start ride test: " + (result && result.error ? result.error : "Unknown error")
+                        });
+                    } else {
+                        callback({
+                            success: true,
+                            payload: "Ride " + rideId + " started in test mode."
+                        });
+                    }
+                });
+                break;
+
+            case "getRideStats":
+                if (!request.params || typeof request.params.rideId !== "number") {
+                    callback({
+                        success: false,
+                        error: "Missing or invalid parameter: rideId"
+                    });
+                    return;
+                }
+                var rideId = request.params.rideId;
+                var ride = map.getRide(rideId);
+                if (!ride) {
+                    callback({
+                        success: false,
+                        error: "Ride not found"
+                    });
+                    return;
+                }
+                var stats = {
+                    excitement: ride.excitement / 100,
+                    intensity: ride.intensity / 100,
+                    nausea: ride.nausea / 100
+                };
+                callback({
+                    success: true,
+                    payload: stats
+                });
+                break;
+
+            case "placeTrackPiece":
+                // Required parameters:
+                // tileCoordinateX, tileCoordinateY, tileCoordinateZ, direction, ride,
+                // trackType, rideType, brakeSpeed, colour, seatRotation, trackPlaceFlags, isFromTrackDesign
+                var requiredParams = [
+                    "tileCoordinateX", "tileCoordinateY", "tileCoordinateZ", "direction", "ride",
+                    "trackType", "rideType", "brakeSpeed", "colour",
+                    "seatRotation", "trackPlaceFlags", "isFromTrackDesign"
+                ];
+                if (!request.params) {
+                    callback({ success: false, error: "Missing parameters for placeTrackPiece" });
+                    return;
+                }
+                for (var i = 0; i < requiredParams.length; i++) {
+                    var key = requiredParams[i];
+                    if (typeof request.params[key] === "undefined") {
+                        callback({ success: false, error: "Missing parameter: " + key });
+                        return;
+                    }
+                }
+                // Convert tile-based input coordinates to game (pixel) units.
+                var pixelCoordinateX = request.params.tileCoordinateX * 32;
+                var pixelCoordinateY = request.params.tileCoordinateY * 32;
+                var pixelCoordinateZ = request.params.tileCoordinateZ * 16;
+                var trackPlaceArgs = {
+                    x: pixelCoordinateX,
+                    y: pixelCoordinateY,
+                    z: pixelCoordinateZ,
+                    direction: request.params.direction,
+                    ride: request.params.ride,
+                    trackType: request.params.trackType,
+                    rideType: request.params.rideType,
+                    brakeSpeed: request.params.brakeSpeed,
+                    colour: request.params.colour,
+                    seatRotation: request.params.seatRotation,
+                    trackPlaceFlags: request.params.trackPlaceFlags,
+                    isFromTrackDesign: request.params.isFromTrackDesign
+                };
+                context.executeAction("trackplace", trackPlaceArgs, function(result) {
+                    // Debug: log the position returned by trackplace (in game units).
+                    console.log("Debug: trackplace returned position:", result.position);
+                    if (!result || (result.error && result.error !== "")) {
+                        callback({
+                            success: false,
+                            error: "Failed to place track piece: " +
+                                (result && result.error ? result.error : "Unknown error")
+                        });
+                    } else {
+                        // For debugging, get the tile using the API–provided tile coordinates.
+                        var tile = map.getTile(request.params.tileCoordinateX, request.params.tileCoordinateY);
+                        if (!tile) {
+                            callback({ success: false, error: "Tile not found" });
+                            return;
+                        }
+                        console.log("Debug: Searching for track element on tile (" + request.params.tileCoordinateX + ", " + request.params.tileCoordinateY + ")");
+                        console.log("Debug: Expected pixel Z value = " + result.position.z);
+                        var elem_index = -1;
+                        for (var i = 0; i < tile.numElements; i++) {
+                            console.log("Debug: Tile element " + i + ": baseZ = " + tile.elements[i].baseZ);
+                            if (tile.elements[i].baseZ === result.position.z) {
+                                elem_index = i;
+                                break;
+                            }
+                        }
+                        if (elem_index === -1) {
+                            callback({ success: false, error: "Could not find track element on tile" });
+                            return;
+                        }
+                        // Use the actual placed position (result.position) for the track iterator.
+                        console.log("Getting iterator on: " + result.position.x + " " + result.position.y + " element index: " + elem_index)
+                        var iterator = map.getTrackIterator({ x: result.position.x, y: result.position.y }, 0);
+                        console.log(iterator)
+                        if (!iterator || !iterator.nextPosition) {
+                            callback({ success: false, error: "Track iterator not available" });
+                            return;
+                        }
+                        var responsePayload = {
+                            message: "Track piece placed for ride " + request.params.ride,
+                            // Return the trackplace action's returned position (converted back to tile coordinates) for debug.
+                            trackplacePosition: {
+                                x: result.position.x / 32,
+                                y: result.position.y / 32,
+                                z: result.position.z / 16,
+                                direction: result.position.direction
+                            },
+                            // Return the endpoint from the iterator.
+                            nextEndpoint: {
+                                x: iterator.nextPosition.x / 32,
+                                y: iterator.nextPosition.y / 32,
+                                z: iterator.nextPosition.z / 16,
+                                direction: iterator.nextPosition.direction
+                            }
+                        };
+                        callback({ success: true, payload: responsePayload });
+                    }
+                });
+                break;
+
+            case "createRide":
+                if (!request.params ||
+                    typeof request.params.rideType !== "number" ||
+                    typeof request.params.rideObject !== "number" ||
+                    typeof request.params.entranceObject !== "number" ||
+                    typeof request.params.colour1 !== "number" ||
+                    typeof request.params.colour2 !== "number") {
+                    callback({
+                        success: false,
+                        error: "Missing or invalid parameters for createRide"
+                    });
+                    return;
+                }
+                var rideCreateArgs = {
+                    rideType: request.params.rideType,
+                    rideObject: request.params.rideObject,
+                    entranceObject: request.params.entranceObject,
+                    colour1: request.params.colour1,
+                    colour2: request.params.colour2
+                };
+                context.executeAction("ridecreate", rideCreateArgs, function (result) {
+                    if (result && typeof result.ride === "number") {
+                        callback({
+                            success: true,
+                            payload: { rideId: result.ride }
+                        });
+                    } else {
+                        callback({
+                            success: false,
+                            error: "Failed to create ride: " + (result && result.error ? result.error : "Unknown error")
+                        });
+                    }
+                });
+                break;
+        }
+    }
 }
 
 // Register the plugin
@@ -303,7 +337,6 @@ registerPlugin({
     authors: ["Markus"],
     type: "intransient",
     licence: "MIT",
-	targetApiVersion: 103,
+    targetApiVersion: 103,
     main: main
 });
-
