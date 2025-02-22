@@ -217,7 +217,7 @@ function main() {
                 // Convert tile-based input coordinates to game (pixel) units.
                 var pixelCoordinateX = request.params.tileCoordinateX * 32;
                 var pixelCoordinateY = request.params.tileCoordinateY * 32;
-                var pixelCoordinateZ = request.params.tileCoordinateZ * 16;
+                var pixelCoordinateZ = request.params.tileCoordinateZ * 8;
                 var trackPlaceArgs = {
                     x: pixelCoordinateX,
                     y: pixelCoordinateY,
@@ -234,7 +234,6 @@ function main() {
                 };
                 context.executeAction("trackplace", trackPlaceArgs, function(result) {
                     // Debug: log the position returned by trackplace (in game units).
-                    console.log("Debug: trackplace returned position:", result.position);
                     if (!result || (result.error && result.error !== "")) {
                         callback({
                             success: false,
@@ -248,12 +247,9 @@ function main() {
                             callback({ success: false, error: "Tile not found" });
                             return;
                         }
-                        console.log("Debug: Searching for track element on tile (" + request.params.tileCoordinateX + ", " + request.params.tileCoordinateY + ")");
-                        console.log("Debug: Expected pixel Z value = " + result.position.z);
                         var elem_index = -1;
                         for (var i = 0; i < tile.numElements; i++) {
-                            console.log("Debug: Tile element " + i + ": baseZ = " + tile.elements[i].baseZ);
-                            if (tile.elements[i].baseZ === result.position.z) {
+                            if (tile.elements[i].baseZ === request.params.tileCoordinateZ*8 && tile.elements[i].type === 'track') {
                                 elem_index = i;
                                 break;
                             }
@@ -263,27 +259,18 @@ function main() {
                             return;
                         }
                         // Use the actual placed position (result.position) for the track iterator.
-                        console.log("Getting iterator on: " + result.position.x + " " + result.position.y + " element index: " + elem_index)
-                        var iterator = map.getTrackIterator({ x: result.position.x, y: result.position.y }, 0);
-                        console.log(iterator)
+                        var iterator = map.getTrackIterator({ x: result.position.x, y: result.position.y }, elem_index);
                         if (!iterator || !iterator.nextPosition) {
-                            callback({ success: false, error: "Track iterator not available" });
+                            callback({ success: false, error: "Track iterator not available on X: " + result.position.x + " Y: " + result.position.y });
                             return;
                         }
                         var responsePayload = {
                             message: "Track piece placed for ride " + request.params.ride,
-                            // Return the trackplace action's returned position (converted back to tile coordinates) for debug.
-                            trackplacePosition: {
-                                x: result.position.x / 32,
-                                y: result.position.y / 32,
-                                z: result.position.z / 16,
-                                direction: result.position.direction
-                            },
                             // Return the endpoint from the iterator.
                             nextEndpoint: {
                                 x: iterator.nextPosition.x / 32,
                                 y: iterator.nextPosition.y / 32,
-                                z: iterator.nextPosition.z / 16,
+                                z: iterator.nextPosition.z / 8,
                                 direction: iterator.nextPosition.direction
                             }
                         };
