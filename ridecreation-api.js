@@ -48,6 +48,154 @@ function main() {
     server.listen(8080);
     console.log("Ride API server listening on port 8080.");
 
+    // Track validation rules based on ending pitch and roll states
+    // Based on actual TrackElemType enum from OpenRCT2 source
+    var trackConnectionRules = {
+        // Station pieces (types 1, 2, 3) can only connect to flat or gentle up
+        "station": {
+            allowed: [0, 6, 4, 16, 17, 42, 43, 18, 19], // flat, flat-to-up25, up25 (with or without chain), turns, banking transitions
+            forbidden: [10, 11, 12, 5, 32, 33] // down slopes, steep up, and banked pieces
+            // Note: Up25 (4) and FlatToUp25 (6) are commonly used with chain lifts after stations
+        },
+        // Flat straight pieces (type 0)
+        "flat": {
+            allowed: [0, 6, 12, 16, 17, 42, 43, 1, 2, 3, 4, 10, 18, 19], // flat, transitions, turns, stations, banking transitions
+            forbidden: [5, 11, 32, 33, 15, 9] // no direct steep, no direct banking, no ending transitions
+        },
+        // Gentle up slope (type 4 = Up25)
+        "up25": {
+            allowed: [4, 9, 7], // continue up25, up25-to-flat, up25-to-60
+            forbidden: [10, 11, 12, 5, 6, 8] // no immediate down, direct steep, or up60-to-up25 (not coming from up60!)
+        },
+        // Steep up slope (type 5 = Up60)
+        "up60": {
+            allowed: [5, 8], // continue up60 or transition down to up25
+            forbidden: [10, 11, 12, 0, 4, 6, 7] // no immediate down, flat, or up25-to-up60 (already steep!)
+        },
+        // Gentle down slope (type 10 = Down25)
+        "down25": {
+            allowed: [10, 15, 13], // continue down25, down25-to-flat, down25-to-60
+            forbidden: [4, 5, 6, 11, 12, 14] // no immediate up, direct steep, or down60-to-down25 (not coming from down60!)
+        },
+        // Steep down slope (type 11 = Down60)
+        "down60": {
+            allowed: [11, 14], // continue down60 or transition to down25
+            forbidden: [4, 5, 6, 0, 10, 12, 13] // no immediate up, flat, or down25-to-down60 (already steep!)
+        },
+        // Turns (16, 17, 42, 43)
+        "turn": {
+            allowed: [0, 16, 17, 42, 43, 6, 12], // flat, turns, gentle transitions
+            forbidden: [5, 11] // no steep during turns
+        },
+        // Banking pieces
+        "left_bank": {
+            allowed: [32, 20, 22, 44], // continue left bank, left-bank-to-flat, banked turns
+            forbidden: [33, 19, 5, 11] // no opposite bank or steep slopes
+        },
+        "right_bank": {
+            allowed: [33, 21, 23, 45], // continue right bank, right-bank-to-flat, banked turns
+            forbidden: [32, 18, 5, 11] // no opposite bank or steep slopes
+        },
+        "flat_to_left_bank": {
+            allowed: [32, 22, 44], // left bank or banked left turns
+            forbidden: [33, 23, 45] // no right banking
+        },
+        "flat_to_right_bank": {
+            allowed: [33, 23, 45], // right bank or banked right turns
+            forbidden: [32, 22, 44] // no left banking
+        }
+    };
+
+    // Track state storage (ride ID -> state)
+    var rideTrackStates = {};
+
+    /**
+     * Get the track state category for validation rules
+     * Based on actual TrackElemType values from OpenRCT2
+     */
+    function getTrackStateCategory(trackType, isStation) {
+        // Station pieces
+        if (isStation || trackType === 1 || trackType === 2 || trackType === 3) {
+            return "station";
+        }
+        
+        // Map track types to state categories based on OpenRCT2 TrackElemType
+        switch(trackType) {
+            // Flat pieces
+            case 0:  // Flat
+                return "flat";
+                
+            // Station pieces
+            case 1:  // EndStation
+            case 2:  // BeginStation
+            case 3:  // MiddleStation
+                return "station";
+                
+            // Up slopes
+            case 4:  // Up25
+                return "up25";
+            case 5:  // Up60
+                return "up60";
+                
+            // Down slopes
+            case 10: // Down25
+                return "down25";
+            case 11: // Down60
+                return "down60";
+                
+            // Transitions
+            case 6:  // FlatToUp25 - ends at up25 angle
+                return "up25"; // After this transition, we're at 25° up
+            case 12: // FlatToDown25 - ends at down25 angle
+                return "down25"; // After this transition, we're at 25° down
+            case 9:  // Up25ToFlat
+            case 15: // Down25ToFlat
+                return "flat"; // These end flat
+                
+            case 7:  // Up25ToUp60 - ends in steep up
+                return "up60"; // This ends in Up60, not Up25!
+                
+            case 8:  // Up60ToUp25 - ends in gentle up
+                return "up25"; // This ends in Up25
+                
+            case 13: // Down25ToDown60 - ends in steep down
+                return "down60"; // This ends in Down60, not Down25!
+                
+            case 14: // Down60ToDown25 - ends in gentle down
+                return "down25"; // This ends in Down25
+                
+            // Turns
+            case 16: // LeftQuarterTurn5Tiles
+            case 17: // RightQuarterTurn5Tiles
+            case 42: // LeftQuarterTurn3Tiles
+            case 43: // RightQuarterTurn3Tiles
+                return "turn";
+                
+            // Banking pieces
+            case 18: // FlatToLeftBank
+                return "flat_to_left_bank";
+            case 19: // FlatToRightBank
+                return "flat_to_right_bank";
+            case 20: // LeftBankToFlat
+            case 21: // RightBankToFlat
+                return "flat"; // These end flat
+            case 32: // LeftBank
+                return "left_bank";
+            case 33: // RightBank
+                return "right_bank";
+            case 22: // BankedLeftQuarterTurn5Tiles
+            case 44: // LeftBankedQuarterTurn3Tiles
+                return "left_bank"; // Banked left turns maintain left bank
+            case 23: // BankedRightQuarterTurn5Tiles
+            case 45: // RightBankedQuarterTurn3Tiles
+                return "right_bank"; // Banked right turns maintain right bank
+                
+            default:
+                console.log("Unknown track type:", trackType, "- defaulting to flat");
+                return "flat"; // Default to flat for unknown pieces
+        }
+    }
+
     /**
      * Processes a request object and calls the callback with the response.
      *
@@ -58,6 +206,7 @@ function main() {
      * - getRideStats
      * - createRide
      * - placeTrackPiece
+     * - getValidNextPieces (new endpoint for track validation)
      * - getTrackCircuit (new endpoint that takes a rideId)
      *
      * @param {Object} request - The parsed JSON request.
@@ -96,7 +245,14 @@ function main() {
                         type: seg.type,
                         description: seg.description,
                         trackGroup: seg.trackGroup,
-                        length: seg.length
+                        length: seg.length,
+                        // Add more properties to understand track types
+                        beginZ: seg.beginZ,
+                        endZ: seg.endZ,
+                        beginDirection: seg.beginDirection,
+                        endDirection: seg.endDirection,
+                        beginBank: seg.beginBank,
+                        endBank: seg.endBank
                     };
                 });
                 callback({
@@ -132,6 +288,10 @@ function main() {
                     }, function (result) {
                         if (!result || (result.error && result.error !== "")) {
                             console.log("Error demolishing ride " + ride.id + ": " + (result && result.error ? result.error : "Unknown error"));
+                        } else {
+                            // Clear the ride state when ride is deleted
+                            delete rideTrackStates[ride.id];
+                            console.log("Cleared track state for deleted ride " + ride.id);
                         }
                         deleteNext();
                     });
@@ -198,6 +358,7 @@ function main() {
                 // Required parameters:
                 // tileCoordinateX, tileCoordinateY, tileCoordinateZ, direction, ride,
                 // trackType, rideType, brakeSpeed, colour, seatRotation, trackPlaceFlags, isFromTrackDesign
+                // Optional: hasChainLift (boolean) - adds chain lift to slope pieces
                 var requiredParams = [
                     "tileCoordinateX", "tileCoordinateY", "tileCoordinateZ", "direction", "ride",
                     "trackType", "rideType", "brakeSpeed", "colour",
@@ -218,6 +379,21 @@ function main() {
                 var pixelCoordinateX = request.params.tileCoordinateX * 32;
                 var pixelCoordinateY = request.params.tileCoordinateY * 32;
                 var pixelCoordinateZ = request.params.tileCoordinateZ * 8;
+                // Check if chain lift flag should be added
+                var flags = request.params.trackPlaceFlags;
+                if (request.params.hasChainLift === true) {
+                    // Add chain lift flag (bit 0)
+                    flags = flags | 1;
+                }
+                
+                // Check if this is the first station piece being placed for this ride
+                var isFirstStation = false;
+                var rideState = rideTrackStates[request.params.ride];
+                if (request.params.trackType === 2 && (!rideState || !rideState.hasPlacedStation)) {
+                    isFirstStation = true;
+                    console.log("Detected first station piece placement for ride " + request.params.ride);
+                }
+                
                 var trackPlaceArgs = {
                     x: pixelCoordinateX,
                     y: pixelCoordinateY,
@@ -229,11 +405,10 @@ function main() {
                     brakeSpeed: request.params.brakeSpeed,
                     colour: request.params.colour,
                     seatRotation: request.params.seatRotation,
-                    trackPlaceFlags: request.params.trackPlaceFlags,
+                    trackPlaceFlags: flags,
                     isFromTrackDesign: request.params.isFromTrackDesign
                 };
                 context.executeAction("trackplace", trackPlaceArgs, function(result) {
-                    // Debug: log the position returned by trackplace (in game units).
                     if (!result || (result.error && result.error !== "")) {
                         callback({
                             success: false,
@@ -241,40 +416,315 @@ function main() {
                                 (result && result.error ? result.error : "Unknown error")
                         });
                     } else {
-                        // For debugging, get the tile using the API–provided tile coordinates.
-                        var tile = map.getTile(request.params.tileCoordinateX, request.params.tileCoordinateY);
+                        console.log("Track placed successfully at result position:", result.position);
+                        
+                        // Get the tile where the track was actually placed (using result position)
+                        var placedTileX = Math.floor(result.position.x / 32);
+                        var placedTileY = Math.floor(result.position.y / 32);
+                        var placedTileZ = result.position.z;
+                        
+                        console.log("Looking for track on tile:", placedTileX, placedTileY, "at height:", placedTileZ);
+                        
+                        var tile = map.getTile(placedTileX, placedTileY);
                         if (!tile) {
-                            callback({ success: false, error: "Tile not found" });
+                            callback({ success: false, error: "Tile not found at placed position" });
                             return;
                         }
+                        
+                        // Find the track element that was just placed
                         var elem_index = -1;
+                        var targetRide = request.params.ride;
+                        var trackElement = null;
+                        
+                        console.log("Searching for track element for ride:", targetRide);
                         for (var i = 0; i < tile.numElements; i++) {
-                            if (tile.elements[i].baseZ === request.params.tileCoordinateZ*8 && tile.elements[i].type === 'track') {
-                                elem_index = i;
-                                break;
+                            var elem = tile.elements[i];
+                            if (elem.type === 'track' && elem.ride === targetRide) {
+                                console.log("Found track element at index", i, "with baseZ:", elem.baseZ, "vs placedZ:", placedTileZ);
+                                // Check if this element is at the right height (with some tolerance)
+                                if (Math.abs(elem.baseZ - placedTileZ) <= 8) {
+                                    elem_index = i;
+                                    trackElement = elem;
+                                    break;
+                                }
                             }
                         }
+                        
                         if (elem_index === -1) {
-                            callback({ success: false, error: "Could not find track element on tile" });
+                            console.log("ERROR: Could not find track element on tile. Checking all tiles around...");
+                            
+                            // Try to find the track element on neighboring tiles
+                            var searchOffsets = [
+                                [0, 0], [-1, 0], [1, 0], [0, -1], [0, 1],
+                                [-1, -1], [-1, 1], [1, -1], [1, 1]
+                            ];
+                            
+                            for (var j = 0; j < searchOffsets.length; j++) {
+                                var searchX = placedTileX + searchOffsets[j][0];
+                                var searchY = placedTileY + searchOffsets[j][1];
+                                var searchTile = map.getTile(searchX, searchY);
+                                
+                                if (searchTile) {
+                                    for (var k = 0; k < searchTile.numElements; k++) {
+                                        var searchElem = searchTile.elements[k];
+                                        if (searchElem.type === 'track' && searchElem.ride === targetRide) {
+                                            if (Math.abs(searchElem.baseZ - placedTileZ) <= 16) {
+                                                console.log("Found track on neighboring tile at offset", searchOffsets[j], "tile:", searchX, searchY);
+                                                placedTileX = searchX;
+                                                placedTileY = searchY;
+                                                tile = searchTile;
+                                                elem_index = k;
+                                                trackElement = searchElem;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if (elem_index !== -1) break;
+                                }
+                            }
+                            
+                            if (elem_index === -1) {
+                                callback({ success: false, error: "Could not find track element on any nearby tile" });
+                                return;
+                            }
+                        }
+                        
+                        console.log("Found track element at index:", elem_index, "on tile:", placedTileX, placedTileY);
+                        console.log("Track element details - direction:", trackElement.direction, "trackType:", trackElement.trackType);
+                        
+                        // Create track iterator at the track element's position
+                        var iteratorPos = { x: placedTileX * 32, y: placedTileY * 32 };
+                        var iterator = map.getTrackIterator(iteratorPos, elem_index);
+                        
+                        if (!iterator) {
+                            console.log("ERROR: Could not create track iterator at position:", iteratorPos, "index:", elem_index);
+                            callback({ success: false, error: "Track iterator not available" });
                             return;
                         }
-                        // Use the actual placed position (result.position) for the track iterator.
-                        var iterator = map.getTrackIterator({ x: result.position.x, y: result.position.y }, elem_index);
-                        if (!iterator || !iterator.nextPosition) {
-                            callback({ success: false, error: "Track iterator not available on X: " + result.position.x + " Y: " + result.position.y });
-                            return;
+                        
+                        if (!iterator.nextPosition) {
+                            console.log("WARNING: Iterator exists but nextPosition is null. Track type:", trackElement.trackType);
+                            console.log("Iterator details:", JSON.stringify({
+                                position: iterator.position,
+                                previousPosition: iterator.previousPosition,
+                                segment: iterator.segment
+                            }));
+                            
+                            // For some track pieces, we might need to advance the iterator
+                            if (iterator.next && typeof iterator.next === 'function') {
+                                var advanced = iterator.next();
+                                if (advanced && iterator.nextPosition) {
+                                    console.log("Advanced iterator, now have nextPosition:", iterator.nextPosition);
+                                } else {
+                                    callback({ success: false, error: "Track has no valid next position" });
+                                    return;
+                                }
+                            } else {
+                                callback({ success: false, error: "Track has no next position available" });
+                                return;
+                            }
                         }
+                        
+                        console.log("Iterator nextPosition (game coords):", iterator.nextPosition);
+                        
+                        // The iterator's nextPosition seems to point to the tile center (16 pixels from corner)
+                        // We need the tile coordinates for placement
+                        // Simply round to nearest tile
+                        var nextTileX = Math.round(iterator.nextPosition.x / 32);
+                        var nextTileY = Math.round(iterator.nextPosition.y / 32);
+                        var nextTileZ = iterator.nextPosition.z / 8;
+                        var nextDirection = iterator.nextPosition.direction;
+                        
+                        console.log("Converted to tile coords - X:", nextTileX, "Y:", nextTileY, "Z:", nextTileZ, "Dir:", nextDirection);
+                        
+                        // If this was the first station piece, place entrance and exit
+                        if (isFirstStation) {
+                            console.log("Placing entrance and exit for first station piece");
+                            
+                            // Calculate positions for entrance and exit based on station direction
+                            // Direction: 0=west, 1=north, 2=east, 3=south
+                            var entranceX, entranceY, exitX, exitY;
+                            var entranceDir, exitDir;
+                            
+                            // Place entrance and exit perpendicular to track direction
+                            if (request.params.direction === 0 || request.params.direction === 2) {
+                                // Track runs east-west, place entrance/exit north-south
+                                entranceX = request.params.tileCoordinateX;
+                                entranceY = request.params.tileCoordinateY - 1; // North of station
+                                exitX = request.params.tileCoordinateX;
+                                exitY = request.params.tileCoordinateY + 1; // South of station
+                                entranceDir = 3; // Face south (towards station)
+                                exitDir = 1; // Face north (away from station)
+                            } else {
+                                // Track runs north-south, place entrance/exit east-west
+                                entranceX = request.params.tileCoordinateX - 1; // West of station
+                                entranceY = request.params.tileCoordinateY;
+                                exitX = request.params.tileCoordinateX + 1; // East of station
+                                exitY = request.params.tileCoordinateY;
+                                entranceDir = 2; // Face east (towards station)
+                                exitDir = 0; // Face west (away from station)
+                            }
+                            
+                            // Place entrance
+                            context.executeAction("rideentranceexitplace", {
+                                x: entranceX * 32,
+                                y: entranceY * 32,
+                                direction: entranceDir,
+                                ride: request.params.ride,
+                                station: 0, // First station
+                                isExit: false
+                            }, function(entranceResult) {
+                                if (entranceResult && !entranceResult.error) {
+                                    console.log("Successfully placed entrance at", entranceX, entranceY);
+                                } else {
+                                    console.log("Failed to place entrance:", entranceResult ? entranceResult.error : "Unknown error");
+                                }
+                            });
+                            
+                            // Place exit
+                            context.executeAction("rideentranceexitplace", {
+                                x: exitX * 32,
+                                y: exitY * 32,
+                                direction: exitDir,
+                                ride: request.params.ride,
+                                station: 0, // First station
+                                isExit: true
+                            }, function(exitResult) {
+                                if (exitResult && !exitResult.error) {
+                                    console.log("Successfully placed exit at", exitX, exitY);
+                                } else {
+                                    console.log("Failed to place exit:", exitResult ? exitResult.error : "Unknown error");
+                                }
+                            });
+                            
+                            // Mark that we've placed the station
+                            if (!rideTrackStates[request.params.ride]) {
+                                rideTrackStates[request.params.ride] = {};
+                            }
+                            rideTrackStates[request.params.ride].hasPlacedStation = true;
+                        }
+                        
+                        // Check if circuit is complete
+                        // We start stations at (67, 66, 14) and place 6 station pieces going left (direction 0 = west)
+                        // So the track needs to return to (61, 66, 14) with direction 0 to connect to the last station piece
+                        var startStationX = 61; // After 6 station pieces from 67 to 62
+                        var startStationY = 66;
+                        var startStationZ = 14;
+                        var startDirection = 0;
+                        
+                        var isCircuitComplete = (
+                            nextTileX === startStationX &&
+                            nextTileY === startStationY &&
+                            nextTileZ === startStationZ &&
+                            nextDirection === startDirection
+                        );
+                        
+                        var circuitMessage = isCircuitComplete ? 
+                            "Circuit complete! Track connects back to station - ready for testing!" : 
+                            "Continue building...";
+                        
+                        if (isCircuitComplete) {
+                            console.log("CIRCUIT COMPLETE! Track successfully connects back to station.");
+                        }
+                        
+                        // Update ride track state for validation
+                        rideTrackStates[request.params.ride] = rideTrackStates[request.params.ride] || {};
+                        rideTrackStates[request.params.ride].lastTrackType = request.params.trackType;
+                        rideTrackStates[request.params.ride].lastX = nextTileX;
+                        rideTrackStates[request.params.ride].lastY = nextTileY;
+                        rideTrackStates[request.params.ride].lastZ = nextTileZ;
+                        rideTrackStates[request.params.ride].lastDirection = nextDirection;
+                        rideTrackStates[request.params.ride].isComplete = isCircuitComplete;
+                        
                         var responsePayload = {
                             message: "Track piece placed for ride " + request.params.ride,
-                            // Return the endpoint from the iterator.
                             nextEndpoint: {
-                                x: iterator.nextPosition.x / 32,
-                                y: iterator.nextPosition.y / 32,
-                                z: iterator.nextPosition.z / 8,
-                                direction: iterator.nextPosition.direction
+                                x: nextTileX,
+                                y: nextTileY,
+                                z: nextTileZ,
+                                direction: nextDirection
+                            },
+                            isCircuitComplete: isCircuitComplete,
+                            circuitMessage: circuitMessage,
+                            debug: {
+                                placedAt: { x: placedTileX, y: placedTileY, z: placedTileZ },
+                                trackType: request.params.trackType,
+                                elemDirection: trackElement.direction
                             }
                         };
+                        
+                        if (isFirstStation) {
+                            responsePayload.entranceExitPlaced = {
+                                entrance: { x: entranceX, y: entranceY, direction: entranceDir },
+                                exit: { x: exitX, y: exitY, direction: exitDir }
+                            };
+                        }
+                        
                         callback({ success: true, payload: responsePayload });
+                    }
+                });
+                break;
+
+            case "getValidNextPieces":
+                if (!request.params || typeof request.params.rideId !== "number") {
+                    callback({
+                        success: false,
+                        error: "Missing or invalid parameter: rideId"
+                    });
+                    return;
+                }
+                
+                var rideId = request.params.rideId;
+                var state = rideTrackStates[rideId];
+                
+                if (!state || state.lastTrackType === null || state.lastTrackType === undefined) {
+                    // No track placed yet or unknown state - allow only station and flat pieces to start
+                    callback({
+                        success: true,
+                        payload: {
+                            validPieces: [0, 1, 2, 3], // Only flat and station pieces to start
+                            lastTrackType: null,
+                            stateCategory: "initial"
+                        }
+                    });
+                    return;
+                }
+                
+                // Get the state category for the last placed track
+                var stateCategory = getTrackStateCategory(state.lastTrackType, false);
+                var rules = trackConnectionRules[stateCategory];
+                
+                if (!rules) {
+                    // No specific rules - allow safe flat pieces only
+                    console.log("Warning: No rules for state category:", stateCategory, "track type:", state.lastTrackType);
+                    callback({
+                        success: true,
+                        payload: {
+                            validPieces: [0, 16, 17, 42, 43], // Only flat and turns as safe fallback
+                            lastTrackType: state.lastTrackType,
+                            stateCategory: stateCategory
+                        }
+                    });
+                    return;
+                }
+                
+                // Filter allowed pieces that are not in forbidden list
+                var validPieces = rules.allowed.filter(function(piece) {
+                    return rules.forbidden.indexOf(piece) === -1;
+                });
+                
+                callback({
+                    success: true,
+                    payload: {
+                        validPieces: validPieces,
+                        lastTrackType: state.lastTrackType,
+                        stateCategory: stateCategory,
+                        position: {
+                            x: state.lastX,
+                            y: state.lastY,
+                            z: state.lastZ,
+                            direction: state.lastDirection
+                        }
                     }
                 });
                 break;
@@ -301,6 +751,16 @@ function main() {
                 };
                 context.executeAction("ridecreate", rideCreateArgs, function (result) {
                     if (result && typeof result.ride === "number") {
+                        // Initialize track state for new ride (always reset in case of ID reuse)
+                        rideTrackStates[result.ride] = {
+                            lastTrackType: null,
+                            lastX: null,
+                            lastY: null,
+                            lastZ: null,
+                            lastDirection: null,
+                            hasPlacedStation: false
+                        };
+                        console.log("Initialized fresh track state for ride " + result.ride);
                         callback({
                             success: true,
                             payload: { rideId: result.ride }
