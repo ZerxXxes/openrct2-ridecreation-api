@@ -7,6 +7,7 @@ The Ride Creation API is a TCP-based JSON API that allows programmatic control o
 ### Features
 - Create and manage rides programmatically
 - Place track pieces with automatic validation
+- Undo/delete last placed track piece for backtracking
 - Automatic entrance/exit placement for stations
 - Circuit completion detection
 - Real-time ride statistics (excitement, intensity, nausea)
@@ -245,7 +246,60 @@ Lists all rides currently in the park.
 }
 ```
 
-### 7. deleteAllRides
+### 7. deleteLastTrackPiece
+
+Removes the most recently placed track piece from a ride. Useful for backtracking when the RL agent detects collisions or wants to try a different path.
+
+#### Request
+```json
+{
+    "endpoint": "deleteLastTrackPiece",
+    "params": {
+        "rideId": 0  // ID of the ride to remove track from
+    }
+}
+```
+
+#### Response (when pieces remain)
+```json
+{
+    "success": true,
+    "payload": {
+        "message": "Track piece removed from ride 0",
+        "piecesRemaining": 5,  // Number of pieces still on the track
+        "nextEndpoint": {       // Where to continue building from
+            "x": 65,
+            "y": 66,
+            "z": 14,
+            "direction": 0
+        },
+        "lastTrackType": 2      // Type of the now-last piece
+    }
+}
+```
+
+#### Response (when no pieces remain)
+```json
+{
+    "success": true,
+    "payload": {
+        "message": "Track piece removed from ride 0",
+        "piecesRemaining": 0,
+        "nextEndpoint": null,   // No pieces left to build from
+        "lastTrackType": null
+    }
+}
+```
+
+#### Error Response
+```json
+{
+    "success": false,
+    "error": "No track pieces to delete for ride 0"
+}
+```
+
+### 8. deleteAllRides
 
 Deletes all rides from the park and clears their states.
 
@@ -264,7 +318,7 @@ Deletes all rides from the park and clears their states.
 }
 ```
 
-### 8. getAllTrackSegments
+### 9. getAllTrackSegments
 
 Returns information about all available track segment types.
 
@@ -480,6 +534,17 @@ req = {
 }
 resp = send_request(sock, req)
 
+# Example: Delete last piece if we detect a collision
+if track_would_collide:  # Your collision detection logic
+    req = {
+        "endpoint": "deleteLastTrackPiece",
+        "params": {"rideId": ride_id}
+    }
+    resp = send_request(sock, req)
+    if resp["success"]:
+        next_pos = resp["payload"]["nextEndpoint"]
+        print(f"Removed piece, can rebuild from: {next_pos}")
+
 # Check if circuit is complete
 if resp["payload"]["isCircuitComplete"]:
     print("Circuit complete! Ready for testing.")
@@ -519,7 +584,8 @@ if resp["payload"]["isCircuitComplete"]:
 2. Use `getValidNextPieces` before placing to ensure valid connections
 3. Store `nextEndpoint` from each placement for the next piece
 4. Check `isCircuitComplete` to know when track is ready for testing
-5. Delete all rides before starting a new training session
+5. Use `deleteLastTrackPiece` to backtrack when collision detection triggers
+6. Delete all rides before starting a new training session
 
 ## Automatic Features
 

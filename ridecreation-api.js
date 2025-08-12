@@ -627,13 +627,28 @@ function main() {
                             console.log("CIRCUIT COMPLETE! Track successfully connects back to station.");
                         }
                         
-                        // Update ride track state for validation
-                        rideTrackStates[request.params.ride] = rideTrackStates[request.params.ride] || {};
-                        rideTrackStates[request.params.ride].lastTrackType = request.params.trackType;
-                        rideTrackStates[request.params.ride].lastX = nextTileX;
-                        rideTrackStates[request.params.ride].lastY = nextTileY;
-                        rideTrackStates[request.params.ride].lastZ = nextTileZ;
-                        rideTrackStates[request.params.ride].lastDirection = nextDirection;
+                        // Update ride track state for validation and history
+                        rideTrackStates[request.params.ride] = rideTrackStates[request.params.ride] || { history: [], hasPlacedStation: false };
+                        
+                        // Add this piece to history for undo functionality
+                        rideTrackStates[request.params.ride].history.push({
+                            // Position where this piece was placed
+                            x: request.params.tileCoordinateX,
+                            y: request.params.tileCoordinateY,
+                            z: request.params.tileCoordinateZ,
+                            direction: request.params.direction,
+                            trackType: request.params.trackType,
+                            // Position where the next piece can connect (for restoring state after undo)
+                            nextX: nextTileX,
+                            nextY: nextTileY,
+                            nextZ: nextTileZ,
+                            nextDirection: nextDirection,
+                            // Element index for removal
+                            elementIndex: elem_index,
+                            placedTileX: placedTileX,
+                            placedTileY: placedTileY
+                        });
+                        
                         rideTrackStates[request.params.ride].isComplete = isCircuitComplete;
                         
                         var responsePayload = {
@@ -677,7 +692,7 @@ function main() {
                 var rideId = request.params.rideId;
                 var state = rideTrackStates[rideId];
                 
-                if (!state || state.lastTrackType === null || state.lastTrackType === undefined) {
+                if (!state || !state.history || state.history.length === 0) {
                     // No track placed yet or unknown state - allow only station and flat pieces to start
                     callback({
                         success: true,
@@ -690,19 +705,28 @@ function main() {
                     return;
                 }
                 
+                // Get the last placed track piece from history
+                var lastPiece = state.history[state.history.length - 1];
+                
                 // Get the state category for the last placed track
-                var stateCategory = getTrackStateCategory(state.lastTrackType, false);
+                var stateCategory = getTrackStateCategory(lastPiece.trackType, false);
                 var rules = trackConnectionRules[stateCategory];
                 
                 if (!rules) {
                     // No specific rules - allow safe flat pieces only
-                    console.log("Warning: No rules for state category:", stateCategory, "track type:", state.lastTrackType);
+                    console.log("Warning: No rules for state category:", stateCategory, "track type:", lastPiece.trackType);
                     callback({
                         success: true,
                         payload: {
                             validPieces: [0, 16, 17, 42, 43], // Only flat and turns as safe fallback
-                            lastTrackType: state.lastTrackType,
-                            stateCategory: stateCategory
+                            lastTrackType: lastPiece.trackType,
+                            stateCategory: stateCategory,
+                            position: {
+                                x: lastPiece.nextX,
+                                y: lastPiece.nextY,
+                                z: lastPiece.nextZ,
+                                direction: lastPiece.nextDirection
+                            }
                         }
                     });
                     return;
@@ -717,14 +741,91 @@ function main() {
                     success: true,
                     payload: {
                         validPieces: validPieces,
-                        lastTrackType: state.lastTrackType,
+                        lastTrackType: lastPiece.trackType,
                         stateCategory: stateCategory,
                         position: {
-                            x: state.lastX,
-                            y: state.lastY,
-                            z: state.lastZ,
-                            direction: state.lastDirection
+                            x: lastPiece.nextX,
+                            y: lastPiece.nextY,
+                            z: lastPiece.nextZ,
+                            direction: lastPiece.nextDirection
                         }
+                    }
+                });
+                break;
+
+            case "deleteLastTrackPiece":
+                if (!request.params || typeof request.params.rideId !== "number") {
+                    callback({
+                        success: false,
+                        error: "Missing or invalid parameter: rideId"
+                    });
+                    return;
+                }
+                
+                var rideId = request.params.rideId;
+                var state = rideTrackStates[rideId];
+                
+                if (!state || !state.history || state.history.length === 0) {
+                    callback({
+                        success: false,
+                        error: "No track pieces to delete for ride " + rideId
+                    });
+                    return;
+                }
+                
+                // Get the last placed piece
+                var lastPiece = state.history[state.history.length - 1];
+                
+                console.log("Attempting to remove track piece at tile:", lastPiece.placedTileX, lastPiece.placedTileY, 
+                            "element index:", lastPiece.elementIndex);
+                
+                // Use trackremove action to delete the track piece
+                context.executeAction("trackremove", {
+                    x: lastPiece.placedTileX * 32,  // Convert tile to pixel coordinates
+                    y: lastPiece.placedTileY * 32,
+                    z: lastPiece.z * 8,  // Convert height units to pixel coordinates
+                    direction: lastPiece.direction,
+                    trackType: lastPiece.trackType,
+                    sequence: 0  // Sequence number for multi-tile pieces (0 for single tile)
+                }, function(result) {
+                    if (!result || (result.error && result.error !== "")) {
+                        console.log("Failed to remove track piece:", result ? result.error : "Unknown error");
+                        callback({
+                            success: false,
+                            error: "Failed to remove track piece: " + (result && result.error ? result.error : "Unknown error")
+                        });
+                    } else {
+                        console.log("Successfully removed track piece");
+                        
+                        // Remove the piece from history
+                        state.history.pop();
+                        
+                        // Prepare response with the new current position
+                        var responsePayload = {
+                            message: "Track piece removed from ride " + rideId,
+                            piecesRemaining: state.history.length
+                        };
+                        
+                        // If there are still pieces, provide the new endpoint for building
+                        if (state.history.length > 0) {
+                            var newLastPiece = state.history[state.history.length - 1];
+                            responsePayload.nextEndpoint = {
+                                x: newLastPiece.nextX,
+                                y: newLastPiece.nextY,
+                                z: newLastPiece.nextZ,
+                                direction: newLastPiece.nextDirection
+                            };
+                            responsePayload.lastTrackType = newLastPiece.trackType;
+                        } else {
+                            // No pieces left, ready to start fresh
+                            responsePayload.nextEndpoint = null;
+                            responsePayload.lastTrackType = null;
+                        }
+                        
+                        callback({
+                            success: true,
+                            payload: responsePayload
+                        });
                     }
                 });
                 break;
@@ -753,11 +854,7 @@ function main() {
                     if (result && typeof result.ride === "number") {
                         // Initialize track state for new ride (always reset in case of ID reuse)
                         rideTrackStates[result.ride] = {
-                            lastTrackType: null,
-                            lastX: null,
-                            lastY: null,
-                            lastZ: null,
-                            lastDirection: null,
+                            history: [],  // Array to store all placed track pieces for undo functionality
                             hasPlacedStation: false
                         };
                         console.log("Initialized fresh track state for ride " + result.ride);
