@@ -387,11 +387,24 @@ function main() {
                 }
                 
                 // Check if this is the first station piece being placed for this ride
+                // Station types: 1=EndStation, 2=BeginStation, 3=MiddleStation
                 var isFirstStation = false;
                 var rideState = rideTrackStates[request.params.ride];
-                if (request.params.trackType === 2 && (!rideState || !rideState.hasPlacedStation)) {
+                var isStationPiece = (request.params.trackType === 1 || 
+                                     request.params.trackType === 2 || 
+                                     request.params.trackType === 3);
+                
+                console.log("Station check - TrackType:", request.params.trackType, 
+                           "IsStation:", isStationPiece, 
+                           "RideState exists:", !!rideState,
+                           "HasPlacedStation:", rideState ? rideState.hasPlacedStation : "N/A");
+                
+                if (isStationPiece && (!rideState || !rideState.hasPlacedStation)) {
                     isFirstStation = true;
-                    console.log("Detected first station piece placement for ride " + request.params.ride);
+                    console.log("*** FIRST STATION DETECTED *** Type:", request.params.trackType, "for ride", request.params.ride);
+                    console.log("Will attempt to place entrance and exit after track placement succeeds");
+                } else if (isStationPiece && rideState && rideState.hasPlacedStation) {
+                    console.log("Additional station piece (type " + request.params.trackType + "), entrance/exit already placed");
                 }
                 
                 var trackPlaceArgs = {
@@ -565,6 +578,11 @@ function main() {
                                 exitDir = 0; // Face west (away from station)
                             }
                             
+                            var entranceSuccess = false;
+                            var exitSuccess = false;
+                            var entranceError = null;
+                            var exitError = null;
+                            
                             // Place entrance
                             context.executeAction("rideentranceexitplace", {
                                 x: entranceX * 32,
@@ -576,8 +594,10 @@ function main() {
                             }, function(entranceResult) {
                                 if (entranceResult && !entranceResult.error) {
                                     console.log("Successfully placed entrance at", entranceX, entranceY);
+                                    entranceSuccess = true;
                                 } else {
-                                    console.log("Failed to place entrance:", entranceResult ? entranceResult.error : "Unknown error");
+                                    entranceError = entranceResult ? entranceResult.error : "Unknown error";
+                                    console.log("Failed to place entrance:", entranceError);
                                 }
                             });
                             
@@ -592,16 +612,24 @@ function main() {
                             }, function(exitResult) {
                                 if (exitResult && !exitResult.error) {
                                     console.log("Successfully placed exit at", exitX, exitY);
+                                    exitSuccess = true;
                                 } else {
-                                    console.log("Failed to place exit:", exitResult ? exitResult.error : "Unknown error");
+                                    exitError = exitResult ? exitResult.error : "Unknown error";
+                                    console.log("Failed to place exit:", exitError);
                                 }
                             });
                             
-                            // Mark that we've placed the station
-                            if (!rideTrackStates[request.params.ride]) {
-                                rideTrackStates[request.params.ride] = {};
+                            // Only mark station as placed if at least one entrance/exit was placed successfully
+                            // This allows retry on the next station piece if placement failed
+                            if (entranceSuccess || exitSuccess) {
+                                if (!rideTrackStates[request.params.ride]) {
+                                    rideTrackStates[request.params.ride] = {};
+                                }
+                                rideTrackStates[request.params.ride].hasPlacedStation = true;
+                                console.log("Marked station as placed. Entrance:", entranceSuccess, "Exit:", exitSuccess);
+                            } else {
+                                console.log("WARNING: Failed to place both entrance and exit. Will retry on next station piece.");
                             }
-                            rideTrackStates[request.params.ride].hasPlacedStation = true;
                         }
                         
                         // Check if circuit is complete
@@ -670,8 +698,21 @@ function main() {
                         
                         if (isFirstStation) {
                             responsePayload.entranceExitPlaced = {
-                                entrance: { x: entranceX, y: entranceY, direction: entranceDir },
-                                exit: { x: exitX, y: exitY, direction: exitDir }
+                                entrance: { 
+                                    x: entranceX, 
+                                    y: entranceY, 
+                                    direction: entranceDir,
+                                    success: entranceSuccess,
+                                    error: entranceError
+                                },
+                                exit: { 
+                                    x: exitX, 
+                                    y: exitY, 
+                                    direction: exitDir,
+                                    success: exitSuccess,
+                                    error: exitError
+                                },
+                                stationMarked: rideTrackStates[request.params.ride] && rideTrackStates[request.params.ride].hasPlacedStation
                             };
                         }
                         
