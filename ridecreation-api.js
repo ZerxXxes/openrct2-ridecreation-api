@@ -206,6 +206,8 @@ function main() {
      * - getRideStats
      * - createRide
      * - placeTrackPiece
+     * - placeEntranceExit (place entrance and exit for a ride's station)
+     * - deleteLastTrackPiece (remove the most recently placed track piece)
      * - getValidNextPieces (new endpoint for track validation)
      * - getTrackCircuit (new endpoint that takes a rideId)
      *
@@ -386,25 +388,15 @@ function main() {
                     flags = flags | 1;
                 }
                 
-                // Check if this is the first station piece being placed for this ride
+                // Log station piece placement for debugging
                 // Station types: 1=EndStation, 2=BeginStation, 3=MiddleStation
-                var isFirstStation = false;
-                var rideState = rideTrackStates[request.params.ride];
                 var isStationPiece = (request.params.trackType === 1 || 
                                      request.params.trackType === 2 || 
                                      request.params.trackType === 3);
                 
-                console.log("Station check - TrackType:", request.params.trackType, 
-                           "IsStation:", isStationPiece, 
-                           "RideState exists:", !!rideState,
-                           "HasPlacedStation:", rideState ? rideState.hasPlacedStation : "N/A");
-                
-                if (isStationPiece && (!rideState || !rideState.hasPlacedStation)) {
-                    isFirstStation = true;
-                    console.log("*** FIRST STATION DETECTED *** Type:", request.params.trackType, "for ride", request.params.ride);
-                    console.log("Will attempt to place entrance and exit after track placement succeeds");
-                } else if (isStationPiece && rideState && rideState.hasPlacedStation) {
-                    console.log("Additional station piece (type " + request.params.trackType + "), entrance/exit already placed");
+                if (isStationPiece) {
+                    console.log("Station piece placed - Type:", request.params.trackType, "for ride", request.params.ride);
+                    console.log("Note: Use placeEntranceExit endpoint to add entrance/exit after station is complete");
                 }
                 
                 var trackPlaceArgs = {
@@ -550,88 +542,6 @@ function main() {
                         
                         console.log("Converted to tile coords - X:", nextTileX, "Y:", nextTileY, "Z:", nextTileZ, "Dir:", nextDirection);
                         
-                        // If this was the first station piece, place entrance and exit
-                        if (isFirstStation) {
-                            console.log("Placing entrance and exit for first station piece");
-                            
-                            // Calculate positions for entrance and exit based on station direction
-                            // Direction: 0=west, 1=north, 2=east, 3=south
-                            var entranceX, entranceY, exitX, exitY;
-                            var entranceDir, exitDir;
-                            
-                            // Place entrance and exit perpendicular to track direction
-                            if (request.params.direction === 0 || request.params.direction === 2) {
-                                // Track runs east-west, place entrance/exit north-south
-                                entranceX = request.params.tileCoordinateX;
-                                entranceY = request.params.tileCoordinateY - 1; // North of station
-                                exitX = request.params.tileCoordinateX;
-                                exitY = request.params.tileCoordinateY + 1; // South of station
-                                entranceDir = 3; // Face south (towards station)
-                                exitDir = 1; // Face north (away from station)
-                            } else {
-                                // Track runs north-south, place entrance/exit east-west
-                                entranceX = request.params.tileCoordinateX - 1; // West of station
-                                entranceY = request.params.tileCoordinateY;
-                                exitX = request.params.tileCoordinateX + 1; // East of station
-                                exitY = request.params.tileCoordinateY;
-                                entranceDir = 2; // Face east (towards station)
-                                exitDir = 0; // Face west (away from station)
-                            }
-                            
-                            var entranceSuccess = false;
-                            var exitSuccess = false;
-                            var entranceError = null;
-                            var exitError = null;
-                            
-                            // Place entrance
-                            context.executeAction("rideentranceexitplace", {
-                                x: entranceX * 32,
-                                y: entranceY * 32,
-                                direction: entranceDir,
-                                ride: request.params.ride,
-                                station: 0, // First station
-                                isExit: false
-                            }, function(entranceResult) {
-                                if (entranceResult && !entranceResult.error) {
-                                    console.log("Successfully placed entrance at", entranceX, entranceY);
-                                    entranceSuccess = true;
-                                } else {
-                                    entranceError = entranceResult ? entranceResult.error : "Unknown error";
-                                    console.log("Failed to place entrance:", entranceError);
-                                }
-                            });
-                            
-                            // Place exit
-                            context.executeAction("rideentranceexitplace", {
-                                x: exitX * 32,
-                                y: exitY * 32,
-                                direction: exitDir,
-                                ride: request.params.ride,
-                                station: 0, // First station
-                                isExit: true
-                            }, function(exitResult) {
-                                if (exitResult && !exitResult.error) {
-                                    console.log("Successfully placed exit at", exitX, exitY);
-                                    exitSuccess = true;
-                                } else {
-                                    exitError = exitResult ? exitResult.error : "Unknown error";
-                                    console.log("Failed to place exit:", exitError);
-                                }
-                            });
-                            
-                            // Only mark station as placed if at least one entrance/exit was placed successfully
-                            // This allows retry on the next station piece if placement failed
-                            if (entranceSuccess || exitSuccess) {
-                                if (!rideTrackStates[request.params.ride]) {
-                                    rideTrackStates[request.params.ride] = {};
-                                }
-                                rideTrackStates[request.params.ride].hasPlacedStation = true;
-                                console.log("Marked station as placed. Entrance:", entranceSuccess, "Exit:", exitSuccess);
-                            } else {
-                                console.log("WARNING: Failed to place both entrance and exit. Will retry on next station piece.");
-                            }
-                        }
-                        
                         // Check if circuit is complete
                         // We start stations at (67, 66, 14) and place 6 station pieces going left (direction 0 = west)
                         // So the track needs to return to (61, 66, 14) with direction 0 to connect to the last station piece
@@ -656,7 +566,7 @@ function main() {
                         }
                         
                         // Update ride track state for validation and history
-                        rideTrackStates[request.params.ride] = rideTrackStates[request.params.ride] || { history: [], hasPlacedStation: false };
+                        rideTrackStates[request.params.ride] = rideTrackStates[request.params.ride] || { history: [] };
                         
                         // Add this piece to history for undo functionality
                         rideTrackStates[request.params.ride].history.push({
@@ -696,24 +606,9 @@ function main() {
                             }
                         };
                         
-                        if (isFirstStation) {
-                            responsePayload.entranceExitPlaced = {
-                                entrance: { 
-                                    x: entranceX, 
-                                    y: entranceY, 
-                                    direction: entranceDir,
-                                    success: entranceSuccess,
-                                    error: entranceError
-                                },
-                                exit: { 
-                                    x: exitX, 
-                                    y: exitY, 
-                                    direction: exitDir,
-                                    success: exitSuccess,
-                                    error: exitError
-                                },
-                                stationMarked: rideTrackStates[request.params.ride] && rideTrackStates[request.params.ride].hasPlacedStation
-                            };
+                        // Add station detection to response if applicable
+                        if (isStationPiece) {
+                            responsePayload.stationDetected = true;
                         }
                         
                         callback({ success: true, payload: responsePayload });
@@ -791,6 +686,171 @@ function main() {
                             direction: lastPiece.nextDirection
                         }
                     }
+                });
+                break;
+
+            case "placeEntranceExit":
+                // Place entrance and exit for a ride's station
+                if (!request.params || typeof request.params.rideId !== "number") {
+                    callback({
+                        success: false,
+                        error: "Missing or invalid parameter: rideId"
+                    });
+                    return;
+                }
+                
+                var rideId = request.params.rideId;
+                var ride = null;
+                
+                // Find the ride by iterating through all rides (find method not available)
+                map.rides.forEach(function(r) {
+                    if (r.id === rideId) {
+                        ride = r;
+                    }
+                });
+                
+                if (!ride) {
+                    callback({
+                        success: false,
+                        error: "Ride " + rideId + " not found"
+                    });
+                    return;
+                }
+                
+                // Find the first station piece in the ride
+                var stationTile = null;
+                var stationDirection = null;
+                var searchComplete = false;
+                
+                // Search for station pieces on the map
+                for (var x = 0; x < map.size.x && !searchComplete; x++) {
+                    for (var y = 0; y < map.size.y && !searchComplete; y++) {
+                        var tile = map.getTile(x, y);
+                        if (tile) {
+                            for (var i = 0; i < tile.numElements; i++) {
+                                var elem = tile.elements[i];
+                                if (elem.type === 'track' && elem.ride === rideId) {
+                                    // Check if this is a station piece (types 1, 2, or 3)
+                                    if (elem.trackType === 1 || elem.trackType === 2 || elem.trackType === 3) {
+                                        stationTile = { x: x, y: y, z: elem.baseZ };
+                                        stationDirection = elem.direction;
+                                        searchComplete = true;
+                                        console.log("Found station piece at", x, y, "direction:", stationDirection);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if (!stationTile) {
+                    callback({
+                        success: false,
+                        error: "No station pieces found for ride " + rideId
+                    });
+                    return;
+                }
+                
+                // Calculate positions for entrance and exit based on station direction
+                // Direction: 0=west, 1=north, 2=east, 3=south
+                var entranceX, entranceY, exitX, exitY;
+                var entranceDir, exitDir;
+                
+                // Place entrance and exit perpendicular to track direction
+                if (stationDirection === 0 || stationDirection === 2) {
+                    // Track runs east-west, place entrance/exit north-south
+                    entranceX = stationTile.x;
+                    entranceY = stationTile.y - 1; // North of station
+                    exitX = stationTile.x;
+                    exitY = stationTile.y + 1; // South of station
+                    entranceDir = 3; // Face south (towards station)
+                    exitDir = 1; // Face north (away from station)
+                } else {
+                    // Track runs north-south, place entrance/exit east-west
+                    entranceX = stationTile.x - 1; // West of station
+                    entranceY = stationTile.y;
+                    exitX = stationTile.x + 1; // East of station
+                    exitY = stationTile.y;
+                    entranceDir = 2; // Face east (towards station)
+                    exitDir = 0; // Face west (away from station)
+                }
+                
+                var entranceSuccess = false;
+                var exitSuccess = false;
+                var entranceError = null;
+                var exitError = null;
+                var actionsCompleted = 0;
+                
+                // Function to send response after both actions complete
+                function checkAndSendResponse() {
+                    actionsCompleted++;
+                    if (actionsCompleted === 2) {
+                        // Both actions completed, send response
+                        if (entranceSuccess && exitSuccess) {
+                            callback({
+                                success: true,
+                                payload: {
+                                    entrance: { x: entranceX, y: entranceY, direction: entranceDir },
+                                    exit: { x: exitX, y: exitY, direction: exitDir }
+                                }
+                            });
+                        } else if (entranceSuccess || exitSuccess) {
+                            callback({
+                                success: true,
+                                payload: {
+                                    entrance: entranceSuccess ? { x: entranceX, y: entranceY, direction: entranceDir } : null,
+                                    exit: exitSuccess ? { x: exitX, y: exitY, direction: exitDir } : null,
+                                    warning: "Only partially successful - " + 
+                                            (entranceError ? "Entrance: " + entranceError + " " : "") +
+                                            (exitError ? "Exit: " + exitError : "")
+                                }
+                            });
+                        } else {
+                            callback({
+                                success: false,
+                                error: "Failed to place entrance and exit. Entrance: " + entranceError + ", Exit: " + exitError
+                            });
+                        }
+                    }
+                }
+                
+                // Place entrance
+                context.executeAction("rideentranceexitplace", {
+                    x: entranceX * 32,
+                    y: entranceY * 32,
+                    direction: entranceDir,
+                    ride: rideId,
+                    station: 0, // First station
+                    isExit: false
+                }, function(entranceResult) {
+                    if (entranceResult && !entranceResult.error) {
+                        console.log("Successfully placed entrance at", entranceX, entranceY);
+                        entranceSuccess = true;
+                    } else {
+                        entranceError = entranceResult ? entranceResult.error : "Unknown error";
+                        console.log("Failed to place entrance:", entranceError);
+                    }
+                    checkAndSendResponse();
+                });
+                
+                // Place exit
+                context.executeAction("rideentranceexitplace", {
+                    x: exitX * 32,
+                    y: exitY * 32,
+                    direction: exitDir,
+                    ride: rideId,
+                    station: 0, // First station
+                    isExit: true
+                }, function(exitResult) {
+                    if (exitResult && !exitResult.error) {
+                        console.log("Successfully placed exit at", exitX, exitY);
+                        exitSuccess = true;
+                    } else {
+                        exitError = exitResult ? exitResult.error : "Unknown error";
+                        console.log("Failed to place exit:", exitError);
+                    }
+                    checkAndSendResponse();
                 });
                 break;
 
@@ -895,8 +955,7 @@ function main() {
                     if (result && typeof result.ride === "number") {
                         // Initialize track state for new ride (always reset in case of ID reuse)
                         rideTrackStates[result.ride] = {
-                            history: [],  // Array to store all placed track pieces for undo functionality
-                            hasPlacedStation: false
+                            history: []  // Array to store all placed track pieces for undo functionality
                         };
                         console.log("Initialized fresh track state for ride " + result.ride);
                         callback({

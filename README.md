@@ -8,7 +8,7 @@ The Ride Creation API is a TCP-based JSON API that allows programmatic control o
 - Create and manage rides programmatically
 - Place track pieces with automatic validation
 - Undo/delete last placed track piece for backtracking
-- Automatic entrance/exit placement for stations
+- Manual entrance/exit placement for stations (via placeEntranceExit endpoint)
 - Circuit completion detection
 - Real-time ride statistics (excitement, intensity, nausea)
 - Chain lift support for slopes
@@ -128,20 +128,48 @@ Places a track piece at specified coordinates with validation and automatic feat
             "trackType": 2,
             "elemDirection": 0
         },
-        "entranceExitPlaced": {      // Only on first station
-            "entrance": {"x": 67, "y": 65, "direction": 3},
-            "exit": {"x": 67, "y": 67, "direction": 1}
-        }
+        "stationDetected": true      // Indicates a station piece was placed
     }
 }
 ```
 
 **Special Features:**
-- **Automatic Entrance/Exit**: When the first station piece (type 2) is placed, entrance and exit are automatically placed on adjacent tiles perpendicular to the track direction
+- **Station Pieces**: Station pieces are tracked, use `placeEntranceExit` endpoint after building station
 - **Chain Lift Support**: Set `hasChainLift: true` for upward slopes (types 4, 5, 6)
 - **Circuit Detection**: Automatically detects when track completes a circuit back to the station
 
-### 3. getValidNextPieces
+### 3. placeEntranceExit
+
+Places entrance and exit for a ride's station. Call this after placing all station pieces.
+
+#### Request
+```json
+{
+    "endpoint": "placeEntranceExit",
+    "params": {
+        "rideId": 0    // Ride ID from createRide
+    }
+}
+```
+
+#### Response
+```json
+{
+    "success": true,
+    "payload": {
+        "entrance": {"x": 67, "y": 65, "direction": 3},
+        "exit": {"x": 67, "y": 67, "direction": 1}
+    }
+}
+```
+
+**Notes:**
+- Automatically finds the first station piece in the ride
+- Places entrance and exit perpendicular to the track direction
+- Must be called after placing station pieces
+- Returns error if no station pieces are found
+
+### 4. getValidNextPieces
 
 Returns valid track pieces that can be placed at the current position based on track validation rules.
 
@@ -484,26 +512,38 @@ req = {
 resp = send_request(sock, req)
 ride_id = resp["payload"]["rideId"]
 
-# Place station piece (automatically places entrance/exit)
+# Place station pieces
+for i in range(3):  # Place 3 station pieces
+    track_type = 2 if i == 0 else 3  # BeginStation, then MiddleStation
+    req = {
+        "endpoint": "placeTrackPiece",
+        "params": {
+            "tileCoordinateX": 67 - i,  # Move left for each piece
+            "tileCoordinateY": 66,
+            "tileCoordinateZ": 14,
+            "direction": 0,
+            "ride": ride_id,
+            "trackType": track_type,
+            "rideType": 52,
+            "brakeSpeed": 0,
+            "colour": 0,
+            "seatRotation": 0,
+            "trackPlaceFlags": 0,
+            "isFromTrackDesign": True
+        }
+    }
+    resp = send_request(sock, req)
+    next_pos = resp["payload"]["nextEndpoint"]
+
+# Place entrance and exit after station is complete
 req = {
-    "endpoint": "placeTrackPiece",
+    "endpoint": "placeEntranceExit",
     "params": {
-        "tileCoordinateX": 67,
-        "tileCoordinateY": 66,
-        "tileCoordinateZ": 14,
-        "direction": 0,
-        "ride": ride_id,
-        "trackType": 2,  # BeginStation
-        "rideType": 52,
-        "brakeSpeed": 0,
-        "colour": 0,
-        "seatRotation": 0,
-        "trackPlaceFlags": 0,
-        "isFromTrackDesign": True
+        "rideId": ride_id
     }
 }
 resp = send_request(sock, req)
-next_pos = resp["payload"]["nextEndpoint"]
+print(f"Entrance/exit placed: {resp['payload']}")
 
 # Get valid pieces for next position
 req = {
