@@ -278,6 +278,8 @@ Lists all rides currently in the park.
 
 Removes the most recently placed track piece from a ride. Useful for backtracking when the RL agent detects collisions or wants to try a different path.
 
+**Note:** This endpoint only removes track pieces, not entrances/exits. Entrances and exits are managed separately through the `placeEntranceExit` endpoint.
+
 #### Request
 ```json
 {
@@ -627,12 +629,13 @@ if resp["payload"]["isCircuitComplete"]:
 5. Use `deleteLastTrackPiece` to backtrack when collision detection triggers
 6. Delete all rides before starting a new training session
 
-## Automatic Features
+## Manual Station Management
 
 ### Entrance/Exit Placement
-When the first station piece (BeginStation, type 2) is placed:
-- Entrance is automatically placed on one side perpendicular to track
-- Exit is placed on the opposite side
+After placing all station pieces, use the `placeEntranceExit` endpoint to add entrance and exit:
+- Automatically finds the first station piece in the ride
+- Places entrance on one side perpendicular to track
+- Places exit on the opposite side
 - Directions are set to face appropriately (entrance towards station, exit away)
 - Placement adjusts based on track direction to avoid blocking the track path
 

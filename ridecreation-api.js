@@ -855,6 +855,8 @@ function main() {
                 break;
 
             case "deleteLastTrackPiece":
+                // This endpoint only removes track pieces, not entrances/exits
+                // Entrances/exits must be managed separately
                 if (!request.params || typeof request.params.rideId !== "number") {
                     callback({
                         success: false,
@@ -878,7 +880,7 @@ function main() {
                 var lastPiece = state.history[state.history.length - 1];
                 
                 console.log("Attempting to remove track piece at tile:", lastPiece.placedTileX, lastPiece.placedTileY, 
-                            "element index:", lastPiece.elementIndex);
+                            "element index:", lastPiece.elementIndex, "trackType:", lastPiece.trackType);
                 
                 // Use trackremove action to delete the track piece
                 context.executeAction("trackremove", {
