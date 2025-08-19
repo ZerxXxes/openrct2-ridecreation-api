@@ -49,60 +49,52 @@ function main() {
     console.log("Ride API server listening on port 8080.");
 
     // Track validation rules based on ending pitch and roll states
-    // Based on actual TrackElemType enum from OpenRCT2 source
+    // Based on actual TrackElemType enum from OpenRCT2 source and neural_rct constraints
     var trackConnectionRules = {
-        // Station pieces (types 1, 2, 3) can only connect to flat or gentle up
+        // Station pieces - Begin/Middle station can only go to End/Middle station
         "station": {
-            allowed: [0, 6, 4, 16, 17, 42, 43, 18, 19], // flat, flat-to-up25, up25 (with or without chain), turns, banking transitions
-            forbidden: [10, 11, 12, 5, 32, 33] // down slopes, steep up, and banked pieces
-            // Note: Up25 (4) and FlatToUp25 (6) are commonly used with chain lifts after stations
+            allowed: [1, 3] // EndStation, MiddleStation only
+        },
+        // End station has many valid transitions (based on neural_rct)
+        "end_station": {
+            allowed: [0, 6, 12, 16, 17, 18, 19, 42, 43] // flat, slope transitions, turns, banking starts
         },
         // Flat straight pieces (type 0)
         "flat": {
-            allowed: [0, 6, 12, 16, 17, 42, 43, 1, 2, 3, 4, 10, 18, 19], // flat, transitions, turns, stations, banking transitions
-            forbidden: [5, 11, 32, 33, 15, 9] // no direct steep, no direct banking, no ending transitions
+            allowed: [0, 6, 12, 16, 17, 42, 43, 4, 10, 18, 19] // flat, transitions, turns, banking transitions
         },
         // Gentle up slope (type 4 = Up25)
         "up25": {
-            allowed: [4, 9, 7], // continue up25, up25-to-flat, up25-to-60
-            forbidden: [10, 11, 12, 5, 6, 8] // no immediate down, direct steep, or up60-to-up25 (not coming from up60!)
+            allowed: [4, 9, 7] // continue up25, up25-to-flat, up25-to-60
         },
         // Steep up slope (type 5 = Up60)
         "up60": {
-            allowed: [5, 8], // continue up60 or transition down to up25
-            forbidden: [10, 11, 12, 0, 4, 6, 7] // no immediate down, flat, or up25-to-up60 (already steep!)
+            allowed: [5, 8] // continue up60 or transition down to up25
         },
         // Gentle down slope (type 10 = Down25)
         "down25": {
-            allowed: [10, 15, 13], // continue down25, down25-to-flat, down25-to-60
-            forbidden: [4, 5, 6, 11, 12, 14] // no immediate up, direct steep, or down60-to-down25 (not coming from down60!)
+            allowed: [10, 15, 13] // continue down25, down25-to-flat, down25-to-60
         },
         // Steep down slope (type 11 = Down60)
         "down60": {
-            allowed: [11, 14], // continue down60 or transition to down25
-            forbidden: [4, 5, 6, 0, 10, 12, 13] // no immediate up, flat, or down25-to-down60 (already steep!)
+            allowed: [11, 14] // continue down60 or transition to down25
         },
         // Turns (16, 17, 42, 43)
         "turn": {
-            allowed: [0, 16, 17, 42, 43, 6, 12], // flat, turns, gentle transitions
-            forbidden: [5, 11] // no steep during turns
+            allowed: [0, 16, 17, 42, 43, 6, 12, 18, 19] // flat, turns, gentle transitions, banking starts
         },
         // Banking pieces
         "left_bank": {
-            allowed: [32, 20, 22, 44], // continue left bank, left-bank-to-flat, banked turns
-            forbidden: [33, 19, 5, 11] // no opposite bank or steep slopes
+            allowed: [32, 20, 22, 44] // continue left bank, left-bank-to-flat, banked turns
         },
         "right_bank": {
-            allowed: [33, 21, 23, 45], // continue right bank, right-bank-to-flat, banked turns
-            forbidden: [32, 18, 5, 11] // no opposite bank or steep slopes
+            allowed: [33, 21, 23, 45] // continue right bank, right-bank-to-flat, banked turns
         },
         "flat_to_left_bank": {
-            allowed: [32, 22, 44], // left bank or banked left turns
-            forbidden: [33, 23, 45] // no right banking
+            allowed: [32, 20, 22, 44] // left bank, left-bank-to-flat, banked left turns
         },
         "flat_to_right_bank": {
-            allowed: [33, 23, 45], // right bank or banked right turns
-            forbidden: [32, 22, 44] // no left banking
+            allowed: [33, 21, 23, 45] // right bank, right-bank-to-flat, banked right turns
         }
     };
 
@@ -114,19 +106,15 @@ function main() {
      * Based on actual TrackElemType values from OpenRCT2
      */
     function getTrackStateCategory(trackType, isStation) {
-        // Station pieces
-        if (isStation || trackType === 1 || trackType === 2 || trackType === 3) {
-            return "station";
-        }
-        
         // Map track types to state categories based on OpenRCT2 TrackElemType
         switch(trackType) {
             // Flat pieces
             case 0:  // Flat
                 return "flat";
                 
-            // Station pieces
+            // Station pieces - distinguish end station from begin/middle
             case 1:  // EndStation
+                return "end_station";
             case 2:  // BeginStation
             case 3:  // MiddleStation
                 return "station";
@@ -668,10 +656,8 @@ function main() {
                     return;
                 }
                 
-                // Filter allowed pieces that are not in forbidden list
-                var validPieces = rules.allowed.filter(function(piece) {
-                    return rules.forbidden.indexOf(piece) === -1;
-                });
+                // Return the allowed pieces directly (allowed and forbidden lists are mutually exclusive by design)
+                var validPieces = rules.allowed;
                 
                 callback({
                     success: true,

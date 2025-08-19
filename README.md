@@ -454,31 +454,42 @@ The API enforces track connection rules based on the current track state:
 - **flat_to_left_bank**: Transitioning to left bank
 - **flat_to_right_bank**: Transitioning to right bank
 
+### Station Placement
+**Important:** Station pieces can only be placed:
+- At the beginning of a ride (when no track exists)
+- From other station pieces (to extend the station)
+
+Once you've built past the station, you cannot build another station. This prevents RL agents from creating multiple stations which would be invalid.
+
 ### Connection Rules
 
 #### From Station
-- ✅ Can connect to: flat, gentle up slopes, turns, banking transitions
-- ❌ Cannot connect to: down slopes, steep slopes, banked pieces
+- ✅ Can connect to: EndStation, MiddleStation only
+
+#### From End Station
+- ✅ Can connect to: flat, slope transitions, turns, banking transitions
 
 #### From Flat
-- ✅ Can connect to: flat, slope transitions, turns, stations, banking transitions
-- ❌ Cannot connect to: direct steep slopes, direct banking
+- ✅ Can connect to: flat, slope transitions, turns, banking transitions
 
 #### From Up25
 - ✅ Can connect to: continue up25, transition to flat, transition to up60
-- ❌ Cannot connect to: down slopes, direct steep, wrong transitions
 
 #### From Up60
 - ✅ Can connect to: continue up60, transition to up25
-- ❌ Cannot connect to: down slopes, flat, wrong transitions
 
 #### From Down25
 - ✅ Can connect to: continue down25, transition to flat, transition to down60
-- ❌ Cannot connect to: up slopes, wrong transitions
 
 #### From Down60
 - ✅ Can connect to: continue down60, transition to down25
-- ❌ Cannot connect to: up slopes, flat, wrong transitions
+
+#### From Turn
+- ✅ Can connect to: flat, turns, gentle transitions, banking starts
+
+#### From Banking States
+- ✅ Left Bank: continue left bank, left-bank-to-flat, banked left turns
+- ✅ Right Bank: continue right bank, right-bank-to-flat, banked right turns
 
 ## Example Usage (Python)
 
