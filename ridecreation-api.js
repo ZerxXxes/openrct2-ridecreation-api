@@ -1,7 +1,19 @@
 function main() {
     "use strict";
 
-    // Create a TCP listener on port 8080
+    // Configuration flags - Edit these to change behavior
+    var RANDOM_PORT = false;  // Set to true to use a random port instead of 8080
+    var RANDOM_PORT_MIN = 20000;  // Minimum port when using random selection
+    var RANDOM_PORT_MAX = 30000;  // Maximum port when using random selection
+    
+    // Select port based on configuration
+    var port = 8080;
+    if (RANDOM_PORT) {
+        port = Math.floor(Math.random() * (RANDOM_PORT_MAX - RANDOM_PORT_MIN + 1)) + RANDOM_PORT_MIN;
+        console.log("Random port mode enabled - selected port " + port);
+    }
+    
+    // Create TCP listener
     var server = network.createListener();
 
     server.on("connection", function (conn) {
@@ -45,8 +57,9 @@ function main() {
         });
     });
 
-    server.listen(8080);
-    console.log("Ride API server listening on port 8080.");
+    // Bind to the selected port
+    server.listen(port);
+    console.log("Ride API server listening on port " + port + ".");
 
     // Track validation rules based on ending pitch and roll states
     // Based on actual TrackElemType enum from OpenRCT2 source and neural_rct constraints
