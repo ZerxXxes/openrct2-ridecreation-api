@@ -152,20 +152,35 @@ Places entrance and exit for a ride's station. Call this after placing all stati
 }
 ```
 
-#### Response
+#### Response (Success)
 ```json
 {
     "success": true,
     "payload": {
         "entrance": {"x": 67, "y": 65, "direction": 3},
-        "exit": {"x": 67, "y": 67, "direction": 1}
+        "exit": {"x": 67, "y": 67, "direction": 1},
+        "message": "Successfully placed entrance and exit"
+    }
+}
+```
+
+#### Response (Partial Success)
+```json
+{
+    "success": true,
+    "payload": {
+        "entrance": {"x": 67, "y": 65, "direction": 3},
+        "exit": null,
+        "warning": "Only partially successful - Could not place exit."
     }
 }
 ```
 
 **Notes:**
-- Automatically finds the first station piece in the ride
+- Automatically finds all station pieces in the ride
+- Tries to place entrance and exit next to each station piece until both are successfully placed
 - Places entrance and exit perpendicular to the track direction
+- If space next to first station piece is blocked, it will try subsequent station pieces
 - Must be called after placing station pieces
 - Returns error if no station pieces are found
 
@@ -201,7 +216,7 @@ Returns valid track pieces that can be placed at the current position based on t
 }
 ```
 
-### 4. getRideStats
+### 5. getRideStats
 
 Returns the ride's ratings after testing is complete.
 
@@ -227,7 +242,7 @@ Returns the ride's ratings after testing is complete.
 }
 ```
 
-### 5. startRideTest
+### 6. startRideTest
 
 Starts the ride in test mode to calculate ratings.
 
@@ -249,7 +264,7 @@ Starts the ride in test mode to calculate ratings.
 }
 ```
 
-### 6. listAllRides
+### 7. listAllRides
 
 Lists all rides currently in the park.
 
@@ -274,7 +289,7 @@ Lists all rides currently in the park.
 }
 ```
 
-### 7. deleteLastTrackPiece
+### 8. deleteLastTrackPiece
 
 Removes the most recently placed track piece from a ride. Useful for backtracking when the RL agent detects collisions or wants to try a different path.
 
@@ -329,7 +344,7 @@ Removes the most recently placed track piece from a ride. Useful for backtrackin
 }
 ```
 
-### 8. deleteAllRides
+### 9. deleteAllRides
 
 Deletes all rides from the park and clears their states.
 
@@ -348,7 +363,7 @@ Deletes all rides from the park and clears their states.
 }
 ```
 
-### 9. getAllTrackSegments
+### 10. getAllTrackSegments
 
 Returns information about all available track segment types.
 
@@ -644,10 +659,13 @@ if resp["payload"]["isCircuitComplete"]:
 
 ### Entrance/Exit Placement
 After placing all station pieces, use the `placeEntranceExit` endpoint to add entrance and exit:
-- Automatically finds the first station piece in the ride
+- Automatically finds all station pieces in the ride
+- Attempts to place entrance and exit next to each station piece
 - Places entrance on one side perpendicular to track
 - Places exit on the opposite side
 - Directions are set to face appropriately (entrance towards station, exit away)
+- If space next to a station piece is blocked, automatically tries the next station piece
+- Continues until both entrance and exit are successfully placed or all station pieces have been tried
 - Placement adjusts based on track direction to avoid blocking the track path
 
 ### Circuit Completion Detection
