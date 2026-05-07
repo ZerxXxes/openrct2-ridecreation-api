@@ -402,6 +402,10 @@ function main() {
         }
         console.log("Successfully removed track piece");
         state.history.pop();
+        if (state.history.length === 0) {
+            state.firstPiece = null;
+            state.isComplete = false;
+        }
         const response = {
             message: `Track piece removed from ride ${rideId}`,
             piecesRemaining: state.history.length,
