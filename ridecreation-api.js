@@ -268,267 +268,7 @@ function main() {
                 break;
 
             case "placeTrackPiece":
-                // Required parameters:
-                // tileCoordinateX, tileCoordinateY, tileCoordinateZ, direction, ride,
-                // trackType, rideType, brakeSpeed, colour, seatRotation, trackPlaceFlags, isFromTrackDesign
-                // Optional: hasChainLift (boolean) - adds chain lift to slope pieces
-                var requiredParams = [
-                    "tileCoordinateX", "tileCoordinateY", "tileCoordinateZ", "direction", "ride",
-                    "trackType", "rideType", "brakeSpeed", "colour",
-                    "seatRotation", "trackPlaceFlags", "isFromTrackDesign"
-                ];
-                if (!request.params) {
-                    callback({ success: false, error: "Missing parameters for placeTrackPiece" });
-                    return;
-                }
-                for (var i = 0; i < requiredParams.length; i++) {
-                    var key = requiredParams[i];
-                    if (typeof request.params[key] === "undefined") {
-                        callback({ success: false, error: "Missing parameter: " + key });
-                        return;
-                    }
-                }
-                // Convert tile-based input coordinates to game (pixel) units.
-                var pixelCoordinateX = request.params.tileCoordinateX * 32;
-                var pixelCoordinateY = request.params.tileCoordinateY * 32;
-                var pixelCoordinateZ = request.params.tileCoordinateZ * 8;
-                // Check if chain lift flag should be added
-                var flags = request.params.trackPlaceFlags;
-                if (request.params.hasChainLift === true) {
-                    // Add chain lift flag (bit 0)
-                    flags = flags | 1;
-                }
-                
-                // Log station piece placement for debugging
-                // Station types: 1=EndStation, 2=BeginStation, 3=MiddleStation
-                var isStationPiece = (request.params.trackType === 1 || 
-                                     request.params.trackType === 2 || 
-                                     request.params.trackType === 3);
-                
-                if (isStationPiece) {
-                    console.log("Station piece placed - Type:", request.params.trackType, "for ride", request.params.ride);
-                    console.log("Note: Use placeEntranceExit endpoint to add entrance/exit after station is complete");
-                }
-                
-                var trackPlaceArgs = {
-                    x: pixelCoordinateX,
-                    y: pixelCoordinateY,
-                    z: pixelCoordinateZ,
-                    direction: request.params.direction,
-                    ride: request.params.ride,
-                    trackType: request.params.trackType,
-                    rideType: request.params.rideType,
-                    brakeSpeed: request.params.brakeSpeed,
-                    colour: request.params.colour,
-                    seatRotation: request.params.seatRotation,
-                    trackPlaceFlags: flags,
-                    isFromTrackDesign: request.params.isFromTrackDesign
-                };
-                context.executeAction("trackplace", trackPlaceArgs, function(result) {
-                    if (!result || (result.error && result.error !== "")) {
-                        callback({
-                            success: false,
-                            error: "Failed to place track piece: " +
-                                (result && result.error ? result.error : "Unknown error")
-                        });
-                    } else {
-                        console.log("Track placed successfully at result position:", result.position);
-                        
-                        // Get the tile where the track was actually placed (using result position)
-                        var placedTileX = Math.floor(result.position.x / 32);
-                        var placedTileY = Math.floor(result.position.y / 32);
-                        var placedTileZ = result.position.z;
-                        
-                        console.log("Looking for track on tile:", placedTileX, placedTileY, "at height:", placedTileZ);
-                        
-                        var tile = map.getTile(placedTileX, placedTileY);
-                        if (!tile) {
-                            callback({ success: false, error: "Tile not found at placed position" });
-                            return;
-                        }
-                        
-                        // Find the track element that was just placed
-                        var elem_index = -1;
-                        var targetRide = request.params.ride;
-                        var trackElement = null;
-                        
-                        console.log("Searching for track element for ride:", targetRide);
-                        for (var i = 0; i < tile.numElements; i++) {
-                            var elem = tile.elements[i];
-                            if (elem.type === 'track' && elem.ride === targetRide) {
-                                console.log("Found track element at index", i, "with baseZ:", elem.baseZ, "vs placedZ:", placedTileZ);
-                                // Check if this element is at the right height (with some tolerance)
-                                if (Math.abs(elem.baseZ - placedTileZ) <= 8) {
-                                    elem_index = i;
-                                    trackElement = elem;
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        if (elem_index === -1) {
-                            console.log("ERROR: Could not find track element on tile. Checking all tiles around...");
-                            
-                            // Try to find the track element on neighboring tiles
-                            var searchOffsets = [
-                                [0, 0], [-1, 0], [1, 0], [0, -1], [0, 1],
-                                [-1, -1], [-1, 1], [1, -1], [1, 1]
-                            ];
-                            
-                            for (var j = 0; j < searchOffsets.length; j++) {
-                                var searchX = placedTileX + searchOffsets[j][0];
-                                var searchY = placedTileY + searchOffsets[j][1];
-                                var searchTile = map.getTile(searchX, searchY);
-                                
-                                if (searchTile) {
-                                    for (var k = 0; k < searchTile.numElements; k++) {
-                                        var searchElem = searchTile.elements[k];
-                                        if (searchElem.type === 'track' && searchElem.ride === targetRide) {
-                                            if (Math.abs(searchElem.baseZ - placedTileZ) <= 16) {
-                                                console.log("Found track on neighboring tile at offset", searchOffsets[j], "tile:", searchX, searchY);
-                                                placedTileX = searchX;
-                                                placedTileY = searchY;
-                                                tile = searchTile;
-                                                elem_index = k;
-                                                trackElement = searchElem;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    if (elem_index !== -1) break;
-                                }
-                            }
-                            
-                            if (elem_index === -1) {
-                                callback({ success: false, error: "Could not find track element on any nearby tile" });
-                                return;
-                            }
-                        }
-                        
-                        console.log("Found track element at index:", elem_index, "on tile:", placedTileX, placedTileY);
-                        console.log("Track element details - direction:", trackElement.direction, "trackType:", trackElement.trackType);
-                        
-                        // Create track iterator at the track element's position
-                        var iteratorPos = { x: placedTileX * 32, y: placedTileY * 32 };
-                        var iterator = map.getTrackIterator(iteratorPos, elem_index);
-                        
-                        if (!iterator) {
-                            console.log("ERROR: Could not create track iterator at position:", iteratorPos, "index:", elem_index);
-                            callback({ success: false, error: "Track iterator not available" });
-                            return;
-                        }
-                        
-                        if (!iterator.nextPosition) {
-                            console.log("WARNING: Iterator exists but nextPosition is null. Track type:", trackElement.trackType);
-                            console.log("Iterator details:", JSON.stringify({
-                                position: iterator.position,
-                                previousPosition: iterator.previousPosition,
-                                segment: iterator.segment
-                            }));
-                            
-                            // For some track pieces, we might need to advance the iterator
-                            if (iterator.next && typeof iterator.next === 'function') {
-                                var advanced = iterator.next();
-                                if (advanced && iterator.nextPosition) {
-                                    console.log("Advanced iterator, now have nextPosition:", iterator.nextPosition);
-                                } else {
-                                    callback({ success: false, error: "Track has no valid next position" });
-                                    return;
-                                }
-                            } else {
-                                callback({ success: false, error: "Track has no next position available" });
-                                return;
-                            }
-                        }
-                        
-                        console.log("Iterator nextPosition (game coords):", iterator.nextPosition);
-                        
-                        // The iterator's nextPosition seems to point to the tile center (16 pixels from corner)
-                        // We need the tile coordinates for placement
-                        // Simply round to nearest tile
-                        var nextTileX = Math.round(iterator.nextPosition.x / 32);
-                        var nextTileY = Math.round(iterator.nextPosition.y / 32);
-                        var nextTileZ = iterator.nextPosition.z / 8;
-                        var nextDirection = iterator.nextPosition.direction;
-                        
-                        console.log("Converted to tile coords - X:", nextTileX, "Y:", nextTileY, "Z:", nextTileZ, "Dir:", nextDirection);
-                        
-                        // Check if circuit is complete
-                        // We start stations at (67, 66, 14) and place 6 station pieces going left (direction 0 = west)
-                        // So the track needs to return to (61, 66, 14) with direction 0 to connect to the last station piece
-                        var startStationX = 61; // After 6 station pieces from 67 to 62
-                        var startStationY = 66;
-                        var startStationZ = 14;
-                        var startDirection = 0;
-                        
-                        var isCircuitComplete = (
-                            nextTileX === startStationX &&
-                            nextTileY === startStationY &&
-                            nextTileZ === startStationZ &&
-                            nextDirection === startDirection
-                        );
-                        
-                        var circuitMessage = isCircuitComplete ? 
-                            "Circuit complete! Track connects back to station - ready for testing!" : 
-                            "Continue building...";
-                        
-                        if (isCircuitComplete) {
-                            console.log("CIRCUIT COMPLETE! Track successfully connects back to station.");
-                        }
-                        
-                        // Update ride track state for validation and history
-                        var s = rideTrackStates.get(request.params.ride);
-                        if (!s) {
-                            s = { history: [] };
-                            rideTrackStates.set(request.params.ride, s);
-                        }
-
-                        // Add this piece to history for undo functionality
-                        s.history.push({
-                            // Position where this piece was placed
-                            x: request.params.tileCoordinateX,
-                            y: request.params.tileCoordinateY,
-                            z: request.params.tileCoordinateZ,
-                            direction: request.params.direction,
-                            trackType: request.params.trackType,
-                            // Position where the next piece can connect (for restoring state after undo)
-                            nextX: nextTileX,
-                            nextY: nextTileY,
-                            nextZ: nextTileZ,
-                            nextDirection: nextDirection,
-                            // Element index for removal
-                            elementIndex: elem_index,
-                            placedTileX: placedTileX,
-                            placedTileY: placedTileY
-                        });
-                        
-                        s.isComplete = isCircuitComplete;
-                        
-                        var responsePayload = {
-                            message: "Track piece placed for ride " + request.params.ride,
-                            nextEndpoint: {
-                                x: nextTileX,
-                                y: nextTileY,
-                                z: nextTileZ,
-                                direction: nextDirection
-                            },
-                            isCircuitComplete: isCircuitComplete,
-                            circuitMessage: circuitMessage,
-                            debug: {
-                                placedAt: { x: placedTileX, y: placedTileY, z: placedTileZ },
-                                trackType: request.params.trackType,
-                                elemDirection: trackElement.direction
-                            }
-                        };
-                        
-                        // Add station detection to response if applicable
-                        if (isStationPiece) {
-                            responsePayload.stationDetected = true;
-                        }
-                        
-                        callback({ success: true, payload: responsePayload });
-                    }
-                });
+                runHandler(handlePlaceTrackPiece(request.params), callback);
                 break;
 
             case "getValidNextPieces":
@@ -912,6 +652,163 @@ function main() {
             response.lastTrackType = newLast.trackType;
         }
         return response;
+    }
+
+    // Search for the just-placed track element on the result tile, then
+    // surrounding tiles. Returns { tile, element, elementIndex, tileX, tileY }
+    // or null.
+    function findPlacedTrackElement(rideId, resultPosition) {
+        const placedTileZ = resultPosition.z;
+        const offsets = [
+            [0, 0], [-1, 0], [1, 0], [0, -1], [0, 1],
+            [-1, -1], [-1, 1], [1, -1], [1, 1],
+        ];
+        const baseX = Math.floor(resultPosition.x / 32);
+        const baseY = Math.floor(resultPosition.y / 32);
+        for (const [dx, dy] of offsets) {
+            const tx = baseX + dx;
+            const ty = baseY + dy;
+            const tile = map.getTile(tx, ty);
+            if (!tile) continue;
+            const tolerance = (dx === 0 && dy === 0) ? 8 : 16;
+            for (let i = 0; i < tile.numElements; i++) {
+                const elem = tile.elements[i];
+                if (elem.type === "track" && elem.ride === rideId
+                    && Math.abs(elem.baseZ - placedTileZ) <= tolerance) {
+                    return { tile, element: elem, elementIndex: i, tileX: tx, tileY: ty };
+                }
+            }
+        }
+        return null;
+    }
+
+    async function handlePlaceTrackPiece(params) {
+        const requiredParams = [
+            "tileCoordinateX", "tileCoordinateY", "tileCoordinateZ", "direction", "ride",
+            "trackType", "rideType", "brakeSpeed", "colour",
+            "seatRotation", "trackPlaceFlags", "isFromTrackDesign",
+        ];
+        if (!params) throw new Error("Missing parameters for placeTrackPiece");
+        for (const key of requiredParams) {
+            if (typeof params[key] === "undefined") throw new Error(`Missing parameter: ${key}`);
+        }
+
+        const pixelCoordinateX = params.tileCoordinateX * 32;
+        const pixelCoordinateY = params.tileCoordinateY * 32;
+        const pixelCoordinateZ = params.tileCoordinateZ * 8;
+        let flags = params.trackPlaceFlags;
+        if (params.hasChainLift === true) flags = flags | 1;
+
+        const isStationPiece = (params.trackType === 1 || params.trackType === 2 || params.trackType === 3);
+        if (isStationPiece) {
+            console.log(`Station piece placed - Type: ${params.trackType} for ride ${params.ride}`);
+            console.log("Note: Use placeEntranceExit endpoint to add entrance/exit after station is complete");
+        }
+
+        let result;
+        try {
+            result = await executeAction("trackplace", {
+                x: pixelCoordinateX,
+                y: pixelCoordinateY,
+                z: pixelCoordinateZ,
+                direction: params.direction,
+                ride: params.ride,
+                trackType: params.trackType,
+                rideType: params.rideType,
+                brakeSpeed: params.brakeSpeed,
+                colour: params.colour,
+                seatRotation: params.seatRotation,
+                trackPlaceFlags: flags,
+                isFromTrackDesign: params.isFromTrackDesign,
+            });
+        } catch (e) {
+            throw new Error(`Failed to place track piece: ${e.message}`);
+        }
+
+        console.log(`Track placed successfully at result position: ${JSON.stringify(result.position)}`);
+
+        const placed = findPlacedTrackElement(params.ride, result.position);
+        if (!placed) throw new Error("Could not find track element on any nearby tile");
+        console.log(`Found track element at index: ${placed.elementIndex} on tile: ${placed.tileX} ${placed.tileY}`);
+
+        const iteratorPos = { x: placed.tileX * 32, y: placed.tileY * 32 };
+        const iterator = map.getTrackIterator(iteratorPos, placed.elementIndex);
+        if (!iterator) throw new Error("Track iterator not available");
+
+        if (!iterator.nextPosition) {
+            console.log("WARNING: Iterator exists but nextPosition is null. Track type:", placed.element.trackType);
+            if (typeof iterator.next === "function") {
+                iterator.next();
+                if (!iterator.nextPosition) throw new Error("Track has no valid next position");
+            } else {
+                throw new Error("Track has no next position available");
+            }
+        }
+
+        const nextTileX = Math.round(iterator.nextPosition.x / 32);
+        const nextTileY = Math.round(iterator.nextPosition.y / 32);
+        const nextTileZ = iterator.nextPosition.z / 8;
+        const nextDirection = iterator.nextPosition.direction;
+
+        // Initialize state if missing (e.g. ride created outside our flow).
+        let state = rideTrackStates.get(params.ride);
+        if (!state) {
+            state = { history: [] };
+            rideTrackStates.set(params.ride, state);
+        }
+        // Record first piece's start position once, for circuit detection.
+        if (!state.firstPiece) {
+            state.firstPiece = {
+                x: params.tileCoordinateX,
+                y: params.tileCoordinateY,
+                z: params.tileCoordinateZ,
+                direction: params.direction,
+            };
+        }
+
+        const isCircuitComplete = (
+            state.firstPiece
+            && nextTileX === state.firstPiece.x
+            && nextTileY === state.firstPiece.y
+            && nextTileZ === state.firstPiece.z
+            && nextDirection === state.firstPiece.direction
+        );
+
+        if (isCircuitComplete) {
+            console.log("CIRCUIT COMPLETE! Track successfully connects back to start.");
+        }
+
+        state.history.push({
+            x: params.tileCoordinateX,
+            y: params.tileCoordinateY,
+            z: params.tileCoordinateZ,
+            direction: params.direction,
+            trackType: params.trackType,
+            nextX: nextTileX,
+            nextY: nextTileY,
+            nextZ: nextTileZ,
+            nextDirection,
+            elementIndex: placed.elementIndex,
+            placedTileX: placed.tileX,
+            placedTileY: placed.tileY,
+        });
+        state.isComplete = isCircuitComplete;
+
+        const responsePayload = {
+            message: `Track piece placed for ride ${params.ride}`,
+            nextEndpoint: { x: nextTileX, y: nextTileY, z: nextTileZ, direction: nextDirection },
+            isCircuitComplete,
+            circuitMessage: isCircuitComplete
+                ? "Circuit complete! Track connects back to start - ready for testing!"
+                : "Continue building...",
+            debug: {
+                placedAt: { x: placed.tileX, y: placed.tileY, z: result.position.z },
+                trackType: params.trackType,
+                elemDirection: placed.element.direction,
+            },
+        };
+        if (isStationPiece) responsePayload.stationDetected = true;
+        return responsePayload;
     }
 }
 
