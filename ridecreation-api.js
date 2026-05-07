@@ -532,74 +532,7 @@ function main() {
                 break;
 
             case "getValidNextPieces":
-                if (!request.params || typeof request.params.rideId !== "number") {
-                    callback({
-                        success: false,
-                        error: "Missing or invalid parameter: rideId"
-                    });
-                    return;
-                }
-                
-                var rideId = request.params.rideId;
-                var state = rideTrackStates.get(rideId);
-
-                if (!state || !state.history || state.history.length === 0) {
-                    // No track placed yet or unknown state - allow only station and flat pieces to start
-                    callback({
-                        success: true,
-                        payload: {
-                            validPieces: [0, 1, 2, 3], // Only flat and station pieces to start
-                            lastTrackType: null,
-                            stateCategory: "initial"
-                        }
-                    });
-                    return;
-                }
-                
-                // Get the last placed track piece from history
-                var lastPiece = state.history[state.history.length - 1];
-                
-                // Get the state category for the last placed track
-                var stateCategory = getTrackStateCategory(lastPiece.trackType, false);
-                var rules = trackConnectionRules[stateCategory];
-                
-                if (!rules) {
-                    // No specific rules - allow safe flat pieces only
-                    console.log("Warning: No rules for state category:", stateCategory, "track type:", lastPiece.trackType);
-                    callback({
-                        success: true,
-                        payload: {
-                            validPieces: [0, 16, 17, 42, 43], // Only flat and turns as safe fallback
-                            lastTrackType: lastPiece.trackType,
-                            stateCategory: stateCategory,
-                            position: {
-                                x: lastPiece.nextX,
-                                y: lastPiece.nextY,
-                                z: lastPiece.nextZ,
-                                direction: lastPiece.nextDirection
-                            }
-                        }
-                    });
-                    return;
-                }
-                
-                // Return the allowed pieces directly (allowed and forbidden lists are mutually exclusive by design)
-                var validPieces = rules.allowed;
-                
-                callback({
-                    success: true,
-                    payload: {
-                        validPieces: validPieces,
-                        lastTrackType: lastPiece.trackType,
-                        stateCategory: stateCategory,
-                        position: {
-                            x: lastPiece.nextX,
-                            y: lastPiece.nextY,
-                            z: lastPiece.nextZ,
-                            direction: lastPiece.nextDirection
-                        }
-                    }
-                });
+                runHandler(handleGetValidNextPieces(request.params), callback);
                 break;
 
             case "placeEntranceExit":
@@ -971,6 +904,43 @@ function main() {
             }
         }
         return "Deleted all rides.";
+    }
+
+    async function handleGetValidNextPieces(params) {
+        const { rideId } = params || {};
+        if (typeof rideId !== "number") throw new Error("Missing or invalid parameter: rideId");
+        const state = rideTrackStates.get(rideId);
+        if (!state || !state.history || state.history.length === 0) {
+            return {
+                validPieces: [0, 1, 2, 3],
+                lastTrackType: null,
+                stateCategory: "initial",
+            };
+        }
+        const lastPiece = state.history[state.history.length - 1];
+        const stateCategory = getTrackStateCategory(lastPiece.trackType, false);
+        const rules = trackConnectionRules[stateCategory];
+        const position = {
+            x: lastPiece.nextX,
+            y: lastPiece.nextY,
+            z: lastPiece.nextZ,
+            direction: lastPiece.nextDirection,
+        };
+        if (!rules) {
+            console.log(`Warning: No rules for state category: ${stateCategory} track type: ${lastPiece.trackType}`);
+            return {
+                validPieces: [0, 16, 17, 42, 43],
+                lastTrackType: lastPiece.trackType,
+                stateCategory,
+                position,
+            };
+        }
+        return {
+            validPieces: rules.allowed,
+            lastTrackType: lastPiece.trackType,
+            stateCategory,
+            position,
+        };
     }
 }
 
