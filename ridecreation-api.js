@@ -698,6 +698,7 @@ registerPlugin({
     authors: ["Markus"],
     type: "intransient",
     licence: "MIT",
+    minApiVersion: 111,
     targetApiVersion: 111,
     main: main
 });
