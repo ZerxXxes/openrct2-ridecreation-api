@@ -256,41 +256,7 @@ function main() {
                 break;
 
             case "deleteAllRides":
-                var ridesToDelete = [];
-                map.rides.forEach(function (ride) {
-                    ridesToDelete.push(ride);
-                });
-                if (ridesToDelete.length === 0) {
-                    callback({
-                        success: true,
-                        payload: "No rides to delete."
-                    });
-                    return;
-                }
-                function deleteNext() {
-                    if (ridesToDelete.length === 0) {
-                        callback({
-                            success: true,
-                            payload: "Deleted all rides."
-                        });
-                        return;
-                    }
-                    var ride = ridesToDelete.shift();
-                    context.executeAction("ridedemolish", {
-                        ride: ride.id,
-                        modifyType: 0  // 0 means demolish.
-                    }, function (result) {
-                        if (!result || (result.error && result.error !== "")) {
-                            console.log("Error demolishing ride " + ride.id + ": " + (result && result.error ? result.error : "Unknown error"));
-                        } else {
-                            // Clear the ride state when ride is deleted
-                            rideTrackStates.delete(ride.id);
-                            console.log("Cleared track state for deleted ride " + ride.id);
-                        }
-                        deleteNext();
-                    });
-                }
-                deleteNext();
+                runHandler(handleDeleteAllRides(), callback);
                 break;
 
             case "startRideTest":
@@ -989,6 +955,22 @@ function main() {
         rideTrackStates.set(result.ride, { history: [] });
         console.log(`Initialized fresh track state for ride ${result.ride}`);
         return { rideId: result.ride };
+    }
+
+    async function handleDeleteAllRides() {
+        const rides = [];
+        map.rides.forEach(r => rides.push(r));
+        if (rides.length === 0) return "No rides to delete.";
+        for (const ride of rides) {
+            try {
+                await executeAction("ridedemolish", { ride: ride.id, modifyType: 0 });
+                rideTrackStates.delete(ride.id);
+                console.log(`Cleared track state for deleted ride ${ride.id}`);
+            } catch (e) {
+                console.log(`Error demolishing ride ${ride.id}: ${e.message}`);
+            }
+        }
+        return "Deleted all rides.";
     }
 }
 
