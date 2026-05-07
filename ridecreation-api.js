@@ -1010,10 +1010,10 @@ function main() {
 // Register the plugin
 registerPlugin({
     name: "Ride Creation API Plugin",
-    version: "0.1",
+    version: "0.2",
     authors: ["Markus"],
     type: "intransient",
     licence: "MIT",
-    targetApiVersion: 103,
+    targetApiVersion: 111,
     main: main
 });
