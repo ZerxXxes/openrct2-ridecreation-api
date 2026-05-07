@@ -2,28 +2,28 @@ function main() {
     "use strict";
 
     // Configuration flags - Edit these to change behavior
-    var RANDOM_PORT = false;  // Set to true to use a random port instead of 8080
-    var RANDOM_PORT_MIN = 20000;  // Minimum port when using random selection
-    var RANDOM_PORT_MAX = 30000;  // Maximum port when using random selection
-    
+    const RANDOM_PORT = false;  // Set to true to use a random port instead of 8080
+    const RANDOM_PORT_MIN = 20000;  // Minimum port when using random selection
+    const RANDOM_PORT_MAX = 30000;  // Maximum port when using random selection
+
     // Select port based on configuration
-    var port = 8080;
+    let port = 8080;
     if (RANDOM_PORT) {
         port = Math.floor(Math.random() * (RANDOM_PORT_MAX - RANDOM_PORT_MIN + 1)) + RANDOM_PORT_MIN;
-        console.log("Random port mode enabled - selected port " + port);
+        console.log(`Random port mode enabled - selected port ${port}`);
     }
-    
-    // Create TCP listener
-    var server = network.createListener();
 
-    server.on("connection", function (conn) {
-        var buffer = "";
+    // Create TCP listener
+    const server = network.createListener();
+
+    server.on("connection", conn => {
+        let buffer = "";
 
         // Handle incoming data on this connection.
-        conn.on("data", function (data) {
+        conn.on("data", data => {
             buffer += data;
             // Split messages on newline; we assume one JSON blob per line.
-            var lines = buffer.split("\n");
+            const lines = buffer.split("\n");
             // If the last element is not empty, it means the last line is incomplete.
             if (lines[lines.length - 1] !== "") {
                 buffer = lines.pop();
@@ -35,31 +35,29 @@ function main() {
             }
 
             // Process each complete JSON message.
-            for (var i = 0; i < lines.length; i++) {
-                (function(line) {
-                    var request;
-                    try {
-                        request = JSON.parse(line);
-                    } catch (e) {
-                        conn.write(JSON.stringify({
-                            success: false,
-                            error: "Invalid JSON"
-                        }) + "\n");
-                        return;
-                    }
+            for (const line of lines) {
+                let request;
+                try {
+                    request = JSON.parse(line);
+                } catch (e) {
+                    conn.write(JSON.stringify({
+                        success: false,
+                        error: "Invalid JSON"
+                    }) + "\n");
+                    continue;
+                }
 
-                    processRequest(request, function (response) {
-                        // Send the response as a JSON blob followed by a newline.
-                        conn.write(JSON.stringify(response) + "\n");
-                    });
-                })(lines[i]);
+                processRequest(request, response => {
+                    // Send the response as a JSON blob followed by a newline.
+                    conn.write(JSON.stringify(response) + "\n");
+                });
             }
         });
     });
 
     // Bind to the selected port
     server.listen(port);
-    console.log("Ride API server listening on port " + port + ".");
+    console.log(`Ride API server listening on port ${port}.`);
 
     // Promise-wrapped context.executeAction. Rejects on result.error so
     // failed actions surface as exceptions in async handlers.
@@ -85,7 +83,7 @@ function main() {
 
     // Track validation rules based on ending pitch and roll states
     // Based on actual TrackElemType enum from OpenRCT2 source and neural_rct constraints
-    var trackConnectionRules = {
+    const trackConnectionRules = {
         // Station pieces - Begin/Middle station can only go to End/Middle station
         "station": {
             allowed: [1, 3] // EndStation, MiddleStation only
@@ -134,7 +132,7 @@ function main() {
     };
 
     // Track state storage (ride ID -> RideState)
-    var rideTrackStates = new Map();
+    const rideTrackStates = new Map();
 
     /**
      * Get the track state category for validation rules
