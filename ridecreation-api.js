@@ -294,30 +294,7 @@ function main() {
                 break;
 
             case "startRideTest":
-                if (!request.params || typeof request.params.rideId !== "number") {
-                    callback({
-                        success: false,
-                        error: "Missing or invalid parameter: rideId"
-                    });
-                    return;
-                }
-                var rideId = request.params.rideId;
-                context.executeAction("ridesetstatus", {
-                    ride: rideId,
-                    status: 2 // 2 means testing.
-                }, function (result) {
-                    if (!result || (result.error && result.error !== "")) {
-                        callback({
-                            success: false,
-                            error: "Failed to start ride test: " + (result && result.error ? result.error : "Unknown error")
-                        });
-                    } else {
-                        callback({
-                            success: true,
-                            payload: "Ride " + rideId + " started in test mode."
-                        });
-                    }
-                });
+                runHandler(handleStartRideTest(request.params), callback);
                 break;
 
             case "getRideStats":
@@ -1010,6 +987,17 @@ function main() {
             intensity: ride.intensity / 100,
             nausea: ride.nausea / 100,
         };
+    }
+
+    async function handleStartRideTest(params) {
+        const { rideId } = params || {};
+        if (typeof rideId !== "number") throw new Error("Missing or invalid parameter: rideId");
+        try {
+            await executeAction("ridesetstatus", { ride: rideId, status: 2 });
+        } catch (e) {
+            throw new Error(`Failed to start ride test: ${e.message}`);
+        }
+        return `Ride ${rideId} started in test mode.`;
     }
 }
 
