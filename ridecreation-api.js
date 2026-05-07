@@ -733,82 +733,7 @@ function main() {
                 break;
 
             case "deleteLastTrackPiece":
-                // This endpoint only removes track pieces, not entrances/exits
-                // Entrances/exits must be managed separately
-                if (!request.params || typeof request.params.rideId !== "number") {
-                    callback({
-                        success: false,
-                        error: "Missing or invalid parameter: rideId"
-                    });
-                    return;
-                }
-                
-                var rideId = request.params.rideId;
-                var state = rideTrackStates.get(rideId);
-
-                if (!state || !state.history || state.history.length === 0) {
-                    callback({
-                        success: false,
-                        error: "No track pieces to delete for ride " + rideId
-                    });
-                    return;
-                }
-                
-                // Get the last placed piece
-                var lastPiece = state.history[state.history.length - 1];
-                
-                console.log("Attempting to remove track piece at tile:", lastPiece.placedTileX, lastPiece.placedTileY, 
-                            "element index:", lastPiece.elementIndex, "trackType:", lastPiece.trackType);
-                
-                // Use trackremove action to delete the track piece
-                context.executeAction("trackremove", {
-                    x: lastPiece.placedTileX * 32,  // Convert tile to pixel coordinates
-                    y: lastPiece.placedTileY * 32,
-                    z: lastPiece.z * 8,  // Convert height units to pixel coordinates
-                    direction: lastPiece.direction,
-                    trackType: lastPiece.trackType,
-                    sequence: 0  // Sequence number for multi-tile pieces (0 for single tile)
-                }, function(result) {
-                    if (!result || (result.error && result.error !== "")) {
-                        console.log("Failed to remove track piece:", result ? result.error : "Unknown error");
-                        callback({
-                            success: false,
-                            error: "Failed to remove track piece: " + (result && result.error ? result.error : "Unknown error")
-                        });
-                    } else {
-                        console.log("Successfully removed track piece");
-                        
-                        // Remove the piece from history
-                        state.history.pop();
-                        
-                        // Prepare response with the new current position
-                        var responsePayload = {
-                            message: "Track piece removed from ride " + rideId,
-                            piecesRemaining: state.history.length
-                        };
-                        
-                        // If there are still pieces, provide the new endpoint for building
-                        if (state.history.length > 0) {
-                            var newLastPiece = state.history[state.history.length - 1];
-                            responsePayload.nextEndpoint = {
-                                x: newLastPiece.nextX,
-                                y: newLastPiece.nextY,
-                                z: newLastPiece.nextZ,
-                                direction: newLastPiece.nextDirection
-                            };
-                            responsePayload.lastTrackType = newLastPiece.trackType;
-                        } else {
-                            // No pieces left, ready to start fresh
-                            responsePayload.nextEndpoint = null;
-                            responsePayload.lastTrackType = null;
-                        }
-                        
-                        callback({
-                            success: true,
-                            payload: responsePayload
-                        });
-                    }
-                });
+                runHandler(handleDeleteLastTrackPiece(request.params), callback);
                 break;
 
             case "createRide":
@@ -941,6 +866,52 @@ function main() {
             stateCategory,
             position,
         };
+    }
+
+    async function handleDeleteLastTrackPiece(params) {
+        const { rideId } = params || {};
+        if (typeof rideId !== "number") throw new Error("Missing or invalid parameter: rideId");
+        const state = rideTrackStates.get(rideId);
+        if (!state || !state.history || state.history.length === 0) {
+            throw new Error(`No track pieces to delete for ride ${rideId}`);
+        }
+        const lastPiece = state.history[state.history.length - 1];
+        console.log(
+            `Attempting to remove track piece at tile: ${lastPiece.placedTileX} ${lastPiece.placedTileY} ` +
+            `element index: ${lastPiece.elementIndex} trackType: ${lastPiece.trackType}`
+        );
+        try {
+            await executeAction("trackremove", {
+                x: lastPiece.placedTileX * 32,
+                y: lastPiece.placedTileY * 32,
+                z: lastPiece.z * 8,
+                direction: lastPiece.direction,
+                trackType: lastPiece.trackType,
+                sequence: 0,
+            });
+        } catch (e) {
+            console.log(`Failed to remove track piece: ${e.message}`);
+            throw new Error(`Failed to remove track piece: ${e.message}`);
+        }
+        console.log("Successfully removed track piece");
+        state.history.pop();
+        const response = {
+            message: `Track piece removed from ride ${rideId}`,
+            piecesRemaining: state.history.length,
+            nextEndpoint: null,
+            lastTrackType: null,
+        };
+        if (state.history.length > 0) {
+            const newLast = state.history[state.history.length - 1];
+            response.nextEndpoint = {
+                x: newLast.nextX,
+                y: newLast.nextY,
+                z: newLast.nextZ,
+                direction: newLast.nextDirection,
+            };
+            response.lastTrackType = newLast.trackType;
+        }
+        return response;
     }
 }
 
