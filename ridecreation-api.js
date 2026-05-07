@@ -219,74 +219,36 @@ function main() {
         }
     }
 
+    const endpoints = new Map([
+        ["listAllRides",         () => handleListAllRides()],
+        ["getAllTrackSegments",  () => handleGetAllTrackSegments()],
+        ["deleteAllRides",       () => handleDeleteAllRides()],
+        ["startRideTest",        params => handleStartRideTest(params)],
+        ["getRideStats",         params => handleGetRideStats(params)],
+        ["placeTrackPiece",      params => handlePlaceTrackPiece(params)],
+        ["getValidNextPieces",   params => handleGetValidNextPieces(params)],
+        ["placeEntranceExit",    params => handlePlaceEntranceExit(params)],
+        ["deleteLastTrackPiece", params => handleDeleteLastTrackPiece(params)],
+        ["createRide",           params => handleCreateRide(params)],
+    ]);
+
     /**
-     * Processes a request object and calls the callback with the response.
-     *
-     * Supported endpoints include:
-     * - listAllRides
-     * - deleteAllRides
-     * - startRideTest
-     * - getRideStats
-     * - createRide
-     * - placeTrackPiece
-     * - placeEntranceExit (place entrance and exit for a ride's station)
-     * - deleteLastTrackPiece (remove the most recently placed track piece)
-     * - getValidNextPieces (new endpoint for track validation)
-     * - getTrackCircuit (new endpoint that takes a rideId)
-     *
-     * @param {Object} request - The parsed JSON request.
-     * @param {Function} callback - The function to call with the response.
+     * Dispatches a JSON request to its endpoint handler.
+     * Looks up endpoint by name in the `endpoints` Map and calls
+     * the matching async handler. Resolved values become
+     * {success: true, payload}; thrown errors become {success: false, error}.
      */
     function processRequest(request, callback) {
         if (!request.endpoint) {
-            callback({
-                success: false,
-                error: "Missing endpoint"
-            });
+            callback({ success: false, error: "Missing endpoint" });
             return;
         }
-
-        switch (request.endpoint) {
-            case "listAllRides":
-                runHandler(handleListAllRides(), callback);
-                break;
-            
-            case "getAllTrackSegments":
-                runHandler(handleGetAllTrackSegments(), callback);
-                break;
-
-            case "deleteAllRides":
-                runHandler(handleDeleteAllRides(), callback);
-                break;
-
-            case "startRideTest":
-                runHandler(handleStartRideTest(request.params), callback);
-                break;
-
-            case "getRideStats":
-                runHandler(handleGetRideStats(request.params), callback);
-                break;
-
-            case "placeTrackPiece":
-                runHandler(handlePlaceTrackPiece(request.params), callback);
-                break;
-
-            case "getValidNextPieces":
-                runHandler(handleGetValidNextPieces(request.params), callback);
-                break;
-
-            case "placeEntranceExit":
-                runHandler(handlePlaceEntranceExit(request.params), callback);
-                break;
-
-            case "deleteLastTrackPiece":
-                runHandler(handleDeleteLastTrackPiece(request.params), callback);
-                break;
-
-            case "createRide":
-                runHandler(handleCreateRide(request.params), callback);
-                break;
+        const handler = endpoints.get(request.endpoint);
+        if (!handler) {
+            callback({ success: false, error: `Unknown endpoint: ${request.endpoint}` });
+            return;
         }
+        runHandler(handler(request.params), callback);
     }
 
     async function handleListAllRides() {
