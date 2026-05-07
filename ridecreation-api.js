@@ -61,6 +61,20 @@ function main() {
     server.listen(port);
     console.log("Ride API server listening on port " + port + ".");
 
+    // Promise-wrapped context.executeAction. Rejects on result.error so
+    // failed actions surface as exceptions in async handlers.
+    function executeAction(action, args) {
+        return new Promise((resolve, reject) => {
+            context.executeAction(action, args, result => {
+                if (!result || (result.error && result.error !== "")) {
+                    reject(new Error((result && result.error) || "Unknown error"));
+                } else {
+                    resolve(result);
+                }
+            });
+        });
+    }
+
     // Track validation rules based on ending pitch and roll states
     // Based on actual TrackElemType enum from OpenRCT2 source and neural_rct constraints
     var trackConnectionRules = {
