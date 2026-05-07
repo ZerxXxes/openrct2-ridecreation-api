@@ -125,8 +125,8 @@ function main() {
         }
     };
 
-    // Track state storage (ride ID -> state)
-    var rideTrackStates = {};
+    // Track state storage (ride ID -> RideState)
+    var rideTrackStates = new Map();
 
     /**
      * Get the track state category for validation rules
@@ -307,7 +307,7 @@ function main() {
                             console.log("Error demolishing ride " + ride.id + ": " + (result && result.error ? result.error : "Unknown error"));
                         } else {
                             // Clear the ride state when ride is deleted
-                            delete rideTrackStates[ride.id];
+                            rideTrackStates.delete(ride.id);
                             console.log("Cleared track state for deleted ride " + ride.id);
                         }
                         deleteNext();
@@ -581,10 +581,14 @@ function main() {
                         }
                         
                         // Update ride track state for validation and history
-                        rideTrackStates[request.params.ride] = rideTrackStates[request.params.ride] || { history: [] };
-                        
+                        var s = rideTrackStates.get(request.params.ride);
+                        if (!s) {
+                            s = { history: [] };
+                            rideTrackStates.set(request.params.ride, s);
+                        }
+
                         // Add this piece to history for undo functionality
-                        rideTrackStates[request.params.ride].history.push({
+                        s.history.push({
                             // Position where this piece was placed
                             x: request.params.tileCoordinateX,
                             y: request.params.tileCoordinateY,
@@ -602,7 +606,7 @@ function main() {
                             placedTileY: placedTileY
                         });
                         
-                        rideTrackStates[request.params.ride].isComplete = isCircuitComplete;
+                        s.isComplete = isCircuitComplete;
                         
                         var responsePayload = {
                             message: "Track piece placed for ride " + request.params.ride,
@@ -641,8 +645,8 @@ function main() {
                 }
                 
                 var rideId = request.params.rideId;
-                var state = rideTrackStates[rideId];
-                
+                var state = rideTrackStates.get(rideId);
+
                 if (!state || !state.history || state.history.length === 0) {
                     // No track placed yet or unknown state - allow only station and flat pieces to start
                     callback({
@@ -911,8 +915,8 @@ function main() {
                 }
                 
                 var rideId = request.params.rideId;
-                var state = rideTrackStates[rideId];
-                
+                var state = rideTrackStates.get(rideId);
+
                 if (!state || !state.history || state.history.length === 0) {
                     callback({
                         success: false,
@@ -1001,9 +1005,9 @@ function main() {
                 context.executeAction("ridecreate", rideCreateArgs, function (result) {
                     if (result && typeof result.ride === "number") {
                         // Initialize track state for new ride (always reset in case of ID reuse)
-                        rideTrackStates[result.ride] = {
+                        rideTrackStates.set(result.ride, {
                             history: []  // Array to store all placed track pieces for undo functionality
-                        };
+                        });
                         console.log("Initialized fresh track state for ride " + result.ride);
                         callback({
                             success: true,
