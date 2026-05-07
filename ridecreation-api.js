@@ -662,8 +662,7 @@ function main() {
         const { rideId } = params || {};
         if (typeof rideId !== "number") throw new Error("Missing or invalid parameter: rideId");
 
-        const ride = [...map.rides].find(r => r.id === rideId);
-        if (!ride) throw new Error(`Ride ${rideId} not found`);
+        if (!map.getRide(rideId)) throw new Error(`Ride ${rideId} not found`);
 
         const stationPieces = findStationPieces(rideId);
         if (stationPieces.length === 0) throw new Error(`No station pieces found for ride ${rideId}`);
