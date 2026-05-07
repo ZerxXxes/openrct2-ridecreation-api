@@ -321,31 +321,7 @@ function main() {
                 break;
 
             case "getRideStats":
-                if (!request.params || typeof request.params.rideId !== "number") {
-                    callback({
-                        success: false,
-                        error: "Missing or invalid parameter: rideId"
-                    });
-                    return;
-                }
-                var rideId = request.params.rideId;
-                var ride = map.getRide(rideId);
-                if (!ride) {
-                    callback({
-                        success: false,
-                        error: "Ride not found"
-                    });
-                    return;
-                }
-                var stats = {
-                    excitement: ride.excitement / 100,
-                    intensity: ride.intensity / 100,
-                    nausea: ride.nausea / 100
-                };
-                callback({
-                    success: true,
-                    payload: stats
-                });
+                runHandler(handleGetRideStats(request.params), callback);
                 break;
 
             case "placeTrackPiece":
@@ -1022,6 +998,18 @@ function main() {
             beginBank: seg.beginBank,
             endBank: seg.endBank,
         }));
+    }
+
+    async function handleGetRideStats(params) {
+        const rideId = params && params.rideId;
+        if (typeof rideId !== "number") throw new Error("Missing or invalid parameter: rideId");
+        const ride = map.getRide(rideId);
+        if (!ride) throw new Error("Ride not found");
+        return {
+            excitement: ride.excitement / 100,
+            intensity: ride.intensity / 100,
+            nausea: ride.nausea / 100,
+        };
     }
 }
 
