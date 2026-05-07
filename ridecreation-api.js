@@ -913,43 +913,7 @@ function main() {
                 break;
 
             case "createRide":
-                if (!request.params ||
-                    typeof request.params.rideType !== "number" ||
-                    typeof request.params.rideObject !== "number" ||
-                    typeof request.params.entranceObject !== "number" ||
-                    typeof request.params.colour1 !== "number" ||
-                    typeof request.params.colour2 !== "number") {
-                    callback({
-                        success: false,
-                        error: "Missing or invalid parameters for createRide"
-                    });
-                    return;
-                }
-                var rideCreateArgs = {
-                    rideType: request.params.rideType,
-                    rideObject: request.params.rideObject,
-                    entranceObject: request.params.entranceObject,
-                    colour1: request.params.colour1,
-                    colour2: request.params.colour2
-                };
-                context.executeAction("ridecreate", rideCreateArgs, function (result) {
-                    if (result && typeof result.ride === "number") {
-                        // Initialize track state for new ride (always reset in case of ID reuse)
-                        rideTrackStates.set(result.ride, {
-                            history: []  // Array to store all placed track pieces for undo functionality
-                        });
-                        console.log("Initialized fresh track state for ride " + result.ride);
-                        callback({
-                            success: true,
-                            payload: { rideId: result.ride }
-                        });
-                    } else {
-                        callback({
-                            success: false,
-                            error: "Failed to create ride: " + (result && result.error ? result.error : "Unknown error")
-                        });
-                    }
-                });
+                runHandler(handleCreateRide(request.params), callback);
                 break;
         }
     }
@@ -998,6 +962,33 @@ function main() {
             throw new Error(`Failed to start ride test: ${e.message}`);
         }
         return `Ride ${rideId} started in test mode.`;
+    }
+
+    async function handleCreateRide(params) {
+        if (!params
+            || typeof params.rideType !== "number"
+            || typeof params.rideObject !== "number"
+            || typeof params.entranceObject !== "number"
+            || typeof params.colour1 !== "number"
+            || typeof params.colour2 !== "number") {
+            throw new Error("Missing or invalid parameters for createRide");
+        }
+        let result;
+        try {
+            result = await executeAction("ridecreate", {
+                rideType: params.rideType,
+                rideObject: params.rideObject,
+                entranceObject: params.entranceObject,
+                colour1: params.colour1,
+                colour2: params.colour2,
+            });
+        } catch (e) {
+            throw new Error(`Failed to create ride: ${e.message}`);
+        }
+        if (typeof result.ride !== "number") throw new Error("Failed to create ride: no ride id returned");
+        rideTrackStates.set(result.ride, { history: [] });
+        console.log(`Initialized fresh track state for ride ${result.ride}`);
+        return { rideId: result.ride };
     }
 }
 
