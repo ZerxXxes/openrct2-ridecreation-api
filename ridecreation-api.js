@@ -252,27 +252,7 @@ function main() {
                 break;
             
             case "getAllTrackSegments":
-                // Retrieve all available track segments.
-                var segments = context.getAllTrackSegments();
-                var result = segments.map(function(seg) {
-                    return {
-                        type: seg.type,
-                        description: seg.description,
-                        trackGroup: seg.trackGroup,
-                        length: seg.length,
-                        // Add more properties to understand track types
-                        beginZ: seg.beginZ,
-                        endZ: seg.endZ,
-                        beginDirection: seg.beginDirection,
-                        endDirection: seg.endDirection,
-                        beginBank: seg.beginBank,
-                        endBank: seg.endBank
-                    };
-                });
-                callback({
-                    success: true,
-                    payload: result
-                });
+                runHandler(handleGetAllTrackSegments(), callback);
                 break;
 
             case "deleteAllRides":
@@ -1027,6 +1007,21 @@ function main() {
             ridesArray.push({ id: ride.id, name: ride.name, type: ride.type });
         });
         return ridesArray;
+    }
+
+    async function handleGetAllTrackSegments() {
+        return context.getAllTrackSegments().map(seg => ({
+            type: seg.type,
+            description: seg.description,
+            trackGroup: seg.trackGroup,
+            length: seg.length,
+            beginZ: seg.beginZ,
+            endZ: seg.endZ,
+            beginDirection: seg.beginDirection,
+            endDirection: seg.endDirection,
+            beginBank: seg.beginBank,
+            endBank: seg.endBank,
+        }));
     }
 }
 
