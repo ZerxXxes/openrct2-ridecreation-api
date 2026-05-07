@@ -228,6 +228,7 @@ function main() {
         ["placeEntranceExit",    params => handlePlaceEntranceExit(params)],
         ["deleteLastTrackPiece", params => handleDeleteLastTrackPiece(params)],
         ["createRide",           params => handleCreateRide(params)],
+        ["listLoadedRideObjects", () => handleListLoadedRideObjects()],
     ]);
 
     /**
@@ -255,6 +256,16 @@ function main() {
             ridesArray.push({ id: ride.id, name: ride.name, type: ride.type });
         });
         return ridesArray;
+    }
+
+    async function handleListLoadedRideObjects() {
+        const all = objectManager.getAllObjects("ride");
+        return all.map(o => ({
+            index: o.index,
+            identifier: o.identifier,
+            name: o.name,
+            rideType: o.rideType,
+        }));
     }
 
     async function handleGetAllTrackSegments() {
@@ -312,6 +323,7 @@ function main() {
                 entranceObject: params.entranceObject,
                 colour1: params.colour1,
                 colour2: params.colour2,
+                inspectionInterval: typeof params.inspectionInterval === "number" ? params.inspectionInterval : 2,
             });
         } catch (e) {
             throw new Error(`Failed to create ride: ${e.message}`);
