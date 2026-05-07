@@ -75,6 +75,14 @@ function main() {
         });
     }
 
+    // Run an async handler and convert its resolved value / thrown error
+    // into the standard {success, payload|error} response shape.
+    function runHandler(handlerPromise, callback) {
+        handlerPromise
+            .then(payload => callback({ success: true, payload }))
+            .catch(e => callback({ success: false, error: e && e.message ? e.message : String(e) }));
+    }
+
     // Track validation rules based on ending pitch and roll states
     // Based on actual TrackElemType enum from OpenRCT2 source and neural_rct constraints
     var trackConnectionRules = {
