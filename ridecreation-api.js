@@ -248,18 +248,7 @@ function main() {
 
         switch (request.endpoint) {
             case "listAllRides":
-                var ridesArray = [];
-                map.rides.forEach(function (ride) {
-                    ridesArray.push({
-                        id: ride.id,
-                        name: ride.name,
-                        type: ride.type
-                    });
-                });
-                callback({
-                    success: true,
-                    payload: ridesArray
-                });
+                runHandler(handleListAllRides(), callback);
                 break;
             
             case "getAllTrackSegments":
@@ -1030,6 +1019,14 @@ function main() {
                 });
                 break;
         }
+    }
+
+    async function handleListAllRides() {
+        const ridesArray = [];
+        map.rides.forEach(ride => {
+            ridesArray.push({ id: ride.id, name: ride.name, type: ride.type });
+        });
+        return ridesArray;
     }
 }
 
