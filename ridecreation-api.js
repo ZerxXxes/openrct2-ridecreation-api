@@ -1001,7 +1001,7 @@ function main() {
     }
 
     async function handleGetRideStats(params) {
-        const rideId = params && params.rideId;
+        const { rideId } = params || {};
         if (typeof rideId !== "number") throw new Error("Missing or invalid parameter: rideId");
         const ride = map.getRide(rideId);
         if (!ride) throw new Error("Ride not found");
