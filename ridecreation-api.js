@@ -560,7 +560,7 @@ function main() {
         );
 
         if (isCircuitComplete) {
-            console.log("CIRCUIT COMPLETE! Track successfully connects back to start.");
+            console.log("CIRCUIT COMPLETE! Track successfully connects back to station.");
         }
 
         state.history.push({
@@ -584,7 +584,7 @@ function main() {
             nextEndpoint: { x: nextTileX, y: nextTileY, z: nextTileZ, direction: nextDirection },
             isCircuitComplete,
             circuitMessage: isCircuitComplete
-                ? "Circuit complete! Track connects back to start - ready for testing!"
+                ? "Circuit complete! Track connects back to station - ready for testing!"
                 : "Continue building...",
             debug: {
                 placedAt: { x: placed.tileX, y: placed.tileY, z: result.position.z },
