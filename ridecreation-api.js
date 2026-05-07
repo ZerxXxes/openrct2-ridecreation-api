@@ -421,27 +421,39 @@ function main() {
         return response;
     }
 
-    // Search for the just-placed track element on the result tile, then
-    // surrounding tiles. Returns { tile, element, elementIndex, tileX, tileY }
-    // or null.
+    // Search for the just-placed track element. First checks the central tile
+    // with tolerance 8, then falls back to all 9 surrounding tiles (including
+    // the center) with tolerance 16. Returns { tile, element, elementIndex,
+    // tileX, tileY } or null.
     function findPlacedTrackElement(rideId, resultPosition) {
         const placedTileZ = resultPosition.z;
+        const baseX = Math.floor(resultPosition.x / 32);
+        const baseY = Math.floor(resultPosition.y / 32);
+
+        const centerTile = map.getTile(baseX, baseY);
+        if (centerTile) {
+            for (let i = 0; i < centerTile.numElements; i++) {
+                const elem = centerTile.elements[i];
+                if (elem.type === "track" && elem.ride === rideId
+                    && Math.abs(elem.baseZ - placedTileZ) <= 8) {
+                    return { tile: centerTile, element: elem, elementIndex: i, tileX: baseX, tileY: baseY };
+                }
+            }
+        }
+
         const offsets = [
             [0, 0], [-1, 0], [1, 0], [0, -1], [0, 1],
             [-1, -1], [-1, 1], [1, -1], [1, 1],
         ];
-        const baseX = Math.floor(resultPosition.x / 32);
-        const baseY = Math.floor(resultPosition.y / 32);
         for (const [dx, dy] of offsets) {
             const tx = baseX + dx;
             const ty = baseY + dy;
             const tile = map.getTile(tx, ty);
             if (!tile) continue;
-            const tolerance = (dx === 0 && dy === 0) ? 8 : 16;
             for (let i = 0; i < tile.numElements; i++) {
                 const elem = tile.elements[i];
                 if (elem.type === "track" && elem.ride === rideId
-                    && Math.abs(elem.baseZ - placedTileZ) <= tolerance) {
+                    && Math.abs(elem.baseZ - placedTileZ) <= 16) {
                     return { tile, element: elem, elementIndex: i, tileX: tx, tileY: ty };
                 }
             }
@@ -493,6 +505,12 @@ function main() {
         }
 
         console.log(`Track placed successfully at result position: ${JSON.stringify(result.position)}`);
+
+        const placedTileX = Math.floor(result.position.x / 32);
+        const placedTileY = Math.floor(result.position.y / 32);
+        if (!map.getTile(placedTileX, placedTileY)) {
+            throw new Error("Tile not found at placed position");
+        }
 
         const placed = findPlacedTrackElement(params.ride, result.position);
         if (!placed) throw new Error("Could not find track element on any nearby tile");
