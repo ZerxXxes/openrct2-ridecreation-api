@@ -4,76 +4,95 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is the OpenRCT2 Ride Creation API - a TCP-based JSON API plugin for OpenRCT2 that allows programmatic control of ride construction. It's designed for reinforcement learning agents to build roller coasters and evaluate their performance using in-game ratings.
+This is the OpenRCT2 Ride Creation API — a TCP-based JSON API plugin for OpenRCT2 that allows programmatic control of ride construction. It is designed for reinforcement learning agents to build roller coasters and evaluate their performance using in-game ratings.
+
+The plugin targets OpenRCT2 0.5.0+ (quickjs-ng scripting engine) and is written in modern JavaScript (ES2015+ with async/await, `const`/`let`, classes, `Map`, template literals, etc.). Earlier OpenRCT2 versions running Duktape will reject the plugin at load time via `minApiVersion: 111`.
 
 ## Key Architecture
 
-### Main Components
+### Main components (`ridecreation-api.js`)
 
-1. **TCP Server (ridecreation-api.js)**
-   - Listens on port 8080
-   - Handles JSON messages with newline delimiters
-   - Processes requests through `processRequest()` function (line 215)
+1. **TCP server**
+   - Listens on port 8080 (or a random port in `[20000, 30000]` if `RANDOM_PORT` is set at the top of `main()`).
+   - Newline-delimited JSON messages.
+   - Connection handler buffers partial reads and dispatches each complete line through `processRequest()`.
 
-2. **Track State Management**
-   - Global `rideTrackStates` object stores state per ride ID
-   - Each ride state contains:
-     - `history`: Array of all placed track pieces with position and connection data
-     - `hasPlacedStation`: Boolean flag for entrance/exit placement
-   - History enables undo functionality via `deleteLastTrackPiece` endpoint
-   - States are cleared when rides are deleted to prevent conflicts
-   - Track validation rules enforced via `trackConnectionRules` object
+2. **Helpers**
+   - `executeAction(action, args) → Promise<result>` — Promise wrapper around `context.executeAction`. Rejects with `new Error(message)` on game-action failure.
+   - `runHandler(handlerPromise, callback)` — converts a resolved/rejected promise into the dispatcher's `{success, payload | error}` response shape. Wraps every handler invocation; handlers throw on failure rather than calling the callback themselves.
 
-3. **API Endpoints** (handled in processRequest switch statement):
-   - `createRide` - Creates new ride with specified parameters
-   - `placeTrackPiece` - Places track with automatic validation
-   - `placeEntranceExit` - Places entrance and exit for a ride's station (call after placing station pieces)
-   - `deleteLastTrackPiece` - Removes most recent track piece for backtracking
-   - `getValidNextPieces` - Returns valid track pieces for current position
-   - `getRideStats` - Returns excitement/intensity/nausea ratings
-   - `startRideTest` - Initiates ride testing mode
-   - `listAllRides` - Lists all rides in park
-   - `deleteAllRides` - Clears all rides and their states
-   - `getAllTrackSegments` - Returns all available track types
+3. **Dispatcher**
+   - `endpoints: Map<string, (params) => Promise<payload>>` — single source of truth for endpoint registration. Adding a new endpoint = write `async function handleX(params)` and add one entry to the Map.
+   - `processRequest(request, callback)` — looks up the endpoint, calls the handler with `request.params`, pipes the promise through `runHandler`. Returns explicit `{success: false, error: "Unknown endpoint: <name>"}` for unregistered endpoints (the old switch-based dispatcher silently dropped these — clients hung).
 
-### Track Validation System
+4. **Track state management**
+   - `rideTrackStates: Map<rideId, RideState>` where `RideState = { history, firstPiece?, isComplete? }`.
+   - `history` is the chronological list of pieces placed via the API (used for `deleteLastTrackPiece` and `getValidNextPieces`).
+   - `firstPiece` is recorded on the first `placeTrackPiece` call for a ride and used for circuit-completion detection (compares `nextEndpoint` against the first piece's start position). Reset to `null` when `history` empties via `deleteLastTrackPiece`.
+   - `isComplete` mirrors the latest `isCircuitComplete` response; reset to `false` on full undo.
+   - State is created automatically by `createRide` and on first `placeTrackPiece` if missing (so manually-created rides also work). Cleared by `deleteAllRides`.
 
-The API uses a state-based validation system:
-- Track pieces are categorized by their ending state (flat, up25, down60, etc.)
-- Connection rules defined in `trackConnectionRules` specify allowed/forbidden connections
-- `getTrackStateCategory()` function (line 116) maps track types to state categories
-- Manual entrance/exit placement via `placeEntranceExit` endpoint after station is built
-- Circuit completion detection when track loops back to start
+5. **Track validation**
+   - `trackConnectionRules` maps a state category to its allowed next track types.
+   - `getTrackStateCategory(trackType)` maps a track type to its ending state.
+   - `getValidNextPieces` returns the allowed list for the most recently placed piece's ending state.
 
-## Development Notes
+### API endpoints
 
-### Running the Plugin
+Registered in the `endpoints` Map. Each handler is `async`; throws → `{success: false, error}`; returns → `{success: true, payload}`.
 
-This is an OpenRCT2 plugin written in JavaScript. To use:
-1. Place `ridecreation-api.js` in the OpenRCT2 plugins folder
-2. Start OpenRCT2 with console enabled
-3. Plugin starts TCP server on port 8080 automatically
-4. Connect via TCP with JSON messages ending in newline
+- `createRide` — create a new ride. Now requires `inspectionInterval` (defaulted to 2 = `every30Minutes` if the client doesn't pass it; OpenRCT2 0.5.0's strict parameter visitor errors on missing fields).
+- `placeTrackPiece` — place a track piece; records to history and updates circuit-detection state.
+- `placeEntranceExit` — scan station pieces, place entrance and exit on perpendicular sides; tries each station in turn until both succeed.
+- `deleteLastTrackPiece` — pop the last placed piece; resets `firstPiece` and `isComplete` when history empties.
+- `getValidNextPieces` — return the validation rules' allowed list for the current track end state.
+- `getRideStats` — return excitement/intensity/nausea ratings (each value is `ride.X / 100`).
+- `startRideTest` — set ride status to `testing` (game action `ridesetstatus` with `status: 2`).
+- `listAllRides` — list all rides in the park (`{id, name, type}` per ride).
+- `deleteAllRides` — demolish every ride sequentially via `ridedemolish`; per-ride failures are logged and the loop continues.
+- `getAllTrackSegments` — return every available track segment with its descriptive fields.
+- `listLoadedRideObjects` — return loaded ride objects (`{index, identifier, name, rideType}`). Useful for discovering valid `rideObject` indices before calling `createRide`.
+
+## Development notes
+
+### Running the plugin
+
+1. Place `ridecreation-api.js` in the OpenRCT2 plugins folder (typically `~/.config/OpenRCT2/plugin/` on Linux).
+2. Start OpenRCT2 0.5.0+ with the developer console enabled.
+3. The TCP server starts automatically on port 8080.
+4. Connect via TCP with newline-delimited JSON.
 
 ### Testing
 
-No automated tests exist. Testing requires:
-1. Running OpenRCT2 with the plugin loaded
-2. Connecting a TCP client to port 8080
-3. Sending JSON requests per the API documentation
+No in-process unit tests exist (the plugin requires a live OpenRCT2 host to run). Verification is end-to-end:
 
-### Common Tasks
+1. Load the plugin in OpenRCT2 0.5.0+.
+2. Run the existing Python harness: `python3 test_entrance_exit.py`, `python3 test_validation.py`, `bash test_station.sh`.
+3. For ad-hoc probing, raw `nc`/`netcat` works but use a longer timeout (`-q 5` or more) for `placeEntranceExit` and `listLoadedRideObjects` since they iterate the map.
 
-- **Add new endpoint**: Add case in `processRequest()` switch statement
-- **Modify track validation**: Update `trackConnectionRules` object
-- **Change track categorization**: Modify `getTrackStateCategory()` function
-- **Debug connections**: Check console output in OpenRCT2
+For syntax-only checks during development: `node --check ridecreation-api.js`. Note that the file references plugin globals (`network`, `context`, `map`, `objectManager`) that aren't defined in node — `--check` only validates syntax, not symbol resolution.
 
-## Important Implementation Details
+### Common tasks
 
-- All track placement coordinates use OpenRCT2's tile system
-- Direction values: 0=west, 1=north, 2=east, 3=south
-- Height units are OpenRCT2's internal height units (not meters/feet)
-- Chain lift support only available on upward slopes (types 4, 5, 6)
-- Track state is maintained per ride to enable proper validation
-- Ride IDs can be reused after deletion (states are cleared)
+- **Add a new endpoint**: write `async function handleX(params)` and add `["x", params => handleX(params)]` to the `endpoints` Map. The dispatcher and error-conversion plumbing are uniform.
+- **Modify track validation rules**: update `trackConnectionRules` (an object literal near the top of `main()`).
+- **Change track-piece state-category mapping**: modify `getTrackStateCategory()` (a switch on track type returning the ending state name).
+- **Debug game-action failures**: every handler logs to the OpenRCT2 console via `console.log`. The plugin's wire response only contains the final error string; per-attempt diagnostics are in the console.
+
+### Calling new game actions
+
+OpenRCT2 0.5.0's `JSToGameActionParameterVisitor` is **strict** about missing JSON fields — it sets `_error = true` on any field the action's `AcceptParameters` visits but the JSON omits, and `QueryOrExecuteAction` then throws `"Invalid action parameters."` before the action runs. This is a behavior change from the lenient Duktape visitor in pre-0.5.0 (which silently defaulted missing fields to 0).
+
+When wiring a new action:
+
+1. Read the action's `AcceptParameters` in the OpenRCT2 source (`src/openrct2/actions/`) to enumerate every field it visits.
+2. Pass every field in your `executeAction(action, args)` call. CoordsXY/CoordsXYZ/CoordsXYZD `Visit` overloads expand to `{x}`, `{x, y, z}`, and `{x, y, z, direction}` field sets respectively.
+3. If the action grows a new field upstream, the plugin will start failing with `"Invalid action parameters."`. Treat that error as a signal to re-audit the action's parameter list.
+
+## Important implementation details
+
+- **Coordinates**: tile-based on input; converted to OpenRCT2 game (pixel) units inside handlers (`*32` for x/y, `*8` for z).
+- **Direction values**: `0`=west, `1`=north, `2`=east, `3`=south.
+- **Chain lift**: bit 0 of `trackPlaceFlags`. Set automatically when `placeTrackPiece` receives `hasChainLift: true`. Only meaningful on upward slopes (track types 4, 5, 6).
+- **Ride IDs are reused** after deletion. State is cleared on `deleteAllRides` and re-initialized fresh by `createRide` (and lazily by `placeTrackPiece` for manually-created rides).
+- **Wire protocol**: stable. Handler return values are wrapped as `{success: true, payload}`; thrown errors become `{success: false, error: <message>}`. Error message strings are intentionally preserved character-for-character with pre-migration wording so existing clients matching on them keep working.

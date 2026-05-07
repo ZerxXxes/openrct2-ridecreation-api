@@ -9,14 +9,18 @@ The Ride Creation API is a TCP-based JSON API that allows programmatic control o
 - Place track pieces with automatic validation
 - Undo/delete last placed track piece for backtracking
 - Manual entrance/exit placement for stations (via placeEntranceExit endpoint)
-- Circuit completion detection
+- Circuit completion detection (relative to the first placed piece)
 - Real-time ride statistics (excitement, intensity, nausea)
 - Chain lift support for slopes
 - Banking and turn support
+- Ride-object discovery via `listLoadedRideObjects` (for picking valid `rideObject` indices)
+
+### Requirements
+- **OpenRCT2 0.5.0 or newer** (uses the quickjs-ng scripting engine; older Duktape-based OpenRCT2 hosts will reject the plugin at load time via `minApiVersion: 111`).
 
 ### Connection Details
 - **Protocol**: TCP
-- **Port**: 8080
+- **Port**: 8080 (configurable; set `RANDOM_PORT = true` at the top of `main()` in the plugin source to bind a random port in `[20000, 30000]`).
 - **Host**: localhost
 - **Message Format**: JSON with newline delimiter
 
@@ -59,19 +63,26 @@ Error responses:
 
 Creates a new ride and initializes its state for track placement.
 
+> **Tip:** call `listLoadedRideObjects` first to discover which `rideObject` indices are loaded in your current scenario / track designer session — the index that's valid varies per scenario.
+
 #### Request
 ```json
 {
     "endpoint": "createRide",
     "params": {
-        "rideType": 52,        // 52 = Wooden Roller Coaster
-        "rideObject": 0,       // Ride object variant
-        "entranceObject": 0,   // Entrance style
-        "colour1": 0,          // Primary color
-        "colour2": 1           // Secondary color
+        "rideType": 52,             // 52 = Wooden Roller Coaster
+        "rideObject": 0,            // Ride object variant (use listLoadedRideObjects to find valid indices)
+        "entranceObject": 0,        // Entrance style
+        "colour1": 0,               // Primary color
+        "colour2": 0,               // Secondary color (must be < the object's vehicle preset count)
+        "inspectionInterval": 2     // OPTIONAL — defaults to 2 (every30Minutes).
+                                    // 0=every10min, 1=every20, 2=every30, 3=every45,
+                                    // 4=hour, 5=2hours, 6=never
     }
 }
 ```
+
+> **OpenRCT2 0.5.0 note:** the `inspectionInterval` field is now visited by `RideCreateAction::AcceptParameters` and the strict quickjs-ng parameter visitor errors on missing fields. This plugin defaults it to `2` so existing clients don't have to send it; only set it if you want a non-default value.
 
 #### Response
 ```json
@@ -136,7 +147,7 @@ Places a track piece at specified coordinates with validation and automatic feat
 **Special Features:**
 - **Station Pieces**: Station pieces are tracked, use `placeEntranceExit` endpoint after building station
 - **Chain Lift Support**: Set `hasChainLift: true` for upward slopes (types 4, 5, 6)
-- **Circuit Detection**: Automatically detects when track completes a circuit back to the station
+- **Circuit Detection**: Automatically detects when track loops back to the **first placed piece's start position** (recorded internally as `state.firstPiece` on the first `placeTrackPiece` call). Works for any ride layout, not just rides built at a hardcoded location.
 
 ### 3. placeEntranceExit
 
@@ -396,6 +407,35 @@ Returns information about all available track segment types.
 }
 ```
 
+### 11. listLoadedRideObjects
+
+Returns every ride object the OpenRCT2 host currently has loaded, with its slot index, identifier, friendly name, and the ride type(s) the object supports. Use this to pick a valid `rideObject` index before calling `createRide` — the slot that holds your wooden coaster (or any other ride) varies per scenario / track designer session, so hardcoding `rideObject: 0` is fragile.
+
+#### Request
+```json
+{
+    "endpoint": "listLoadedRideObjects"
+}
+```
+
+#### Response
+```json
+{
+    "success": true,
+    "payload": [
+        {
+            "index": 0,
+            "identifier": "rct2.ride.ptct1",
+            "name": "Wooden Roller Coaster Trains",
+            "rideType": [52, 255, 255]
+        }
+        // ... more objects
+    ]
+}
+```
+
+The `rideType` array contains up to 3 ride types the object can be used as; `255` means "unused slot". Pick an `index` whose `rideType` includes the type you want to pass as `rideType` to `createRide`.
+
 ## Track Types Reference
 
 ### Basic Track Pieces
@@ -641,10 +681,13 @@ if resp["payload"]["isCircuitComplete"]:
 ### Common Errors
 
 1. **"Missing endpoint"** - Request doesn't include endpoint field
-2. **"Missing parameter: X"** - Required parameter X not provided
-3. **"Ride not found"** - Invalid ride ID
-4. **"Track has no valid next position"** - Track piece doesn't connect properly
-5. **"Failed to place track piece"** - Invalid placement (collision, invalid position)
+2. **"Unknown endpoint: X"** - Endpoint name doesn't match any registered handler (the dispatcher is now a Map; previously unknown endpoints silently dropped, leaving clients hanging)
+3. **"Missing parameter: X"** / **"Missing or invalid parameter: X"** - Required parameter X not provided or wrong type
+4. **"Ride not found"** / **"Ride X not found"** - Invalid ride ID
+5. **"Track has no valid next position"** - Track piece doesn't connect properly
+6. **"Failed to place track piece: ..."** - Invalid placement (collision, invalid position). The trailing string is OpenRCT2's own action error.
+7. **"Failed to create ride: Invalid action parameters."** - One of `rideType` / `rideObject` / `entranceObject` / `colour1` / `colour2` is invalid for your current scenario, or the chosen `rideObject` slot isn't loaded. Use `listLoadedRideObjects` to find a valid `rideObject`.
+8. **"Invalid JSON"** - Request line wasn't a valid JSON object terminated by newline.
 
 ### Best Practices
 
@@ -670,15 +713,15 @@ After placing all station pieces, use the `placeEntranceExit` endpoint to add en
 
 ### Circuit Completion Detection
 The API automatically detects when a track completes a circuit:
-- Checks if next placement position matches station start
-- Verifies direction alignment
-- Returns `isCircuitComplete: true` when circuit is ready
-- Provides status message for user feedback
+- The first piece placed for a ride is recorded internally as the circuit anchor (`state.firstPiece`).
+- After every subsequent `placeTrackPiece`, the iterator's next position is compared against that anchor (x, y, z, direction).
+- When all four match, `isCircuitComplete: true` is returned along with the `circuitMessage` "Circuit complete! Track connects back to station - ready for testing!".
+- If you fully undo the track via `deleteLastTrackPiece` (`piecesRemaining` reaches 0), the anchor resets — the next placement starts a fresh circuit-detection state.
 
 ### State Management
-- Track states are maintained per ride
-- States are cleared when rides are deleted
-- Prevents state conflicts when ride IDs are reused
+- Track states are maintained per ride in a `Map<rideId, RideState>`.
+- States are cleared when rides are deleted (`deleteAllRides` or individual demolish via the game).
+- Manually-created rides (built via the OpenRCT2 UI rather than the API) are still usable — the API lazily initializes state for them on the first `placeTrackPiece` call.
 
 ## Reinforcement Learning Integration
 
@@ -708,4 +751,11 @@ This API is designed for RL agents with the following considerations:
 
 ## Version History
 
-- **v0.1** - Initial API with basic track placement, validation, automatic entrance/exit placement, and circuit detection
+- **v0.2** — Migrated from Duktape to quickjs-ng for OpenRCT2 0.5.0+. Internal rewrite to async/await with a `Map`-based dispatcher; ~30% smaller plugin source. Behaviour fixes included:
+  - Circuit detection is now relative to the first placed piece (was hardcoded to `(61, 66, 14, dir=0)` which only worked for one specific layout).
+  - `deleteLastTrackPiece` now resets `state.firstPiece` and `state.isComplete` when it pops the last piece, so building a fresh ride afterwards isn't compared against the deleted ride's anchor.
+  - Unknown endpoints now return `{success: false, error: "Unknown endpoint: <name>"}` instead of silently dropping requests.
+  - `createRide` now passes `inspectionInterval` (required by OpenRCT2 0.5.0's strict `JSToGameActionParameterVisitor`).
+  - New `listLoadedRideObjects` endpoint for discovering valid `rideObject` indices.
+  - `targetApiVersion: 111` and `minApiVersion: 111` set for OpenRCT2 0.5.0.
+- **v0.1** - Initial API with basic track placement, validation, automatic entrance/exit placement, and circuit detection.
