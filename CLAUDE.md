@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is the OpenRCT2 Ride Creation API — a TCP-based JSON API plugin for OpenRCT2 that allows programmatic control of ride construction. It is designed for reinforcement learning agents to build roller coasters and evaluate their performance using in-game ratings.
 
-The plugin targets OpenRCT2 0.5.0+ (quickjs-ng scripting engine) and is written in modern JavaScript (ES2015+ with async/await, `const`/`let`, classes, `Map`, template literals, etc.). Earlier OpenRCT2 versions running Duktape will reject the plugin at load time via `minApiVersion: 111`.
+The plugin targets OpenRCT2 0.5.0+ (quickjs-ng scripting engine) and is written in modern JavaScript (ES2015+ with async/await, `const`/`let`, classes, `Map`, template literals, etc.). The plugin requires `TrackSegment.getNextValidSegments(rideId)` from OpenRCT2 PR [#25840](https://github.com/OpenRCT2/OpenRCT2/pull/25840), so `minApiVersion` is set to 114 — older OpenRCT2 builds will reject the plugin at load time.
 
 ## Key Architecture
 
@@ -33,9 +33,9 @@ The plugin targets OpenRCT2 0.5.0+ (quickjs-ng scripting engine) and is written 
    - State is created automatically by `createRide` and on first `placeTrackPiece` if missing (so manually-created rides also work). Cleared by `deleteAllRides`.
 
 5. **Track validation**
-   - `trackConnectionRules` maps a state category to its allowed next track types.
-   - `getTrackStateCategory(trackType)` maps a track type to its ending state.
-   - `getValidNextPieces` returns the allowed list for the most recently placed piece's ending state.
+   - `getValidNextPieces` delegates to the native `segment.getNextValidSegments(rideId)` (added in OpenRCT2 PR #25840), which is ride-type-aware (filters covered variants, gates `slopeSteepUp`/`curveVertical`, etc.). The plugin holds no validation tables of its own — the previous `trackConnectionRules` / `getTrackStateCategory` pair was removed in favor of the native call.
+   - For empty history (no piece placed yet) `getValidNextPieces` returns a conservative fixed set: Flat / EndStation / BeginStation / MiddleStation (types `[0, 1, 2, 3]`). Replacing this with a ride-type-aware "valid initial pieces" lookup is gated on a future upstream API.
+   - `serializeTrackSegment(seg)` is the single source of truth for the wire shape of a track segment; both `getValidNextPieces.validSegments` and `getAllTrackSegments` go through it.
 
 ### API endpoints
 
@@ -45,7 +45,7 @@ Registered in the `endpoints` Map. Each handler is `async`; throws → `{success
 - `placeTrackPiece` — place a track piece; records to history and updates circuit-detection state.
 - `placeEntranceExit` — scan station pieces, place entrance and exit on perpendicular sides; tries each station in turn until both succeed.
 - `deleteLastTrackPiece` — pop the last placed piece; resets `firstPiece` and `isComplete` when history empties.
-- `getValidNextPieces` — return the validation rules' allowed list for the current track end state.
+- `getValidNextPieces` — return the valid follow-on track pieces for the most-recently-placed piece (or the conservative initial set if history is empty). Backed by native `segment.getNextValidSegments(rideId)`; response includes both `validPieces` (numeric type IDs, wire-compatible with pre-migration clients) and `validSegments` (rich segment objects via `serializeTrackSegment`). `stateCategory` is retained as a key but is always `null` (the local classification no longer exists).
 - `getRideStats` — return excitement/intensity/nausea ratings (each value is `ride.X / 100`).
 - `startRideTest` — set ride status to `testing` (game action `ridesetstatus` with `status: 2`).
 - `listAllRides` — list all rides in the park (`{id, name, type}` per ride).
@@ -75,8 +75,7 @@ For syntax-only checks during development: `node --check ridecreation-api.js`. N
 ### Common tasks
 
 - **Add a new endpoint**: write `async function handleX(params)` and add `["x", params => handleX(params)]` to the `endpoints` Map. The dispatcher and error-conversion plumbing are uniform.
-- **Modify track validation rules**: update `trackConnectionRules` (an object literal near the top of `main()`).
-- **Change track-piece state-category mapping**: modify `getTrackStateCategory()` (a switch on track type returning the ending state name).
+- **Change the wire shape of a track segment**: update `serializeTrackSegment()` — both `getValidNextPieces` and `getAllTrackSegments` consume it, so they stay in sync automatically.
 - **Debug game-action failures**: every handler logs to the OpenRCT2 console via `console.log`. The plugin's wire response only contains the final error string; per-attempt diagnostics are in the console.
 
 ### Calling new game actions

@@ -81,140 +81,26 @@ function main() {
             .catch(e => callback({ success: false, error: e && e.message ? e.message : String(e) }));
     }
 
-    // Track validation rules based on ending pitch and roll states
-    // Based on actual TrackElemType enum from OpenRCT2 source and neural_rct constraints
-    const trackConnectionRules = {
-        // Station pieces - Begin/Middle station can only go to End/Middle station
-        "station": {
-            allowed: [1, 3] // EndStation, MiddleStation only
-        },
-        // End station has many valid transitions (based on neural_rct)
-        "end_station": {
-            allowed: [0, 6, 12, 16, 17, 18, 19, 42, 43] // flat, slope transitions, turns, banking starts
-        },
-        // Flat straight pieces (type 0)
-        "flat": {
-            allowed: [0, 6, 12, 16, 17, 42, 43, 4, 10, 18, 19] // flat, transitions, turns, banking transitions
-        },
-        // Gentle up slope (type 4 = Up25)
-        "up25": {
-            allowed: [4, 9, 7] // continue up25, up25-to-flat, up25-to-60
-        },
-        // Steep up slope (type 5 = Up60)
-        "up60": {
-            allowed: [5, 8] // continue up60 or transition down to up25
-        },
-        // Gentle down slope (type 10 = Down25)
-        "down25": {
-            allowed: [10, 15, 13] // continue down25, down25-to-flat, down25-to-60
-        },
-        // Steep down slope (type 11 = Down60)
-        "down60": {
-            allowed: [11, 14] // continue down60 or transition to down25
-        },
-        // Turns (16, 17, 42, 43)
-        "turn": {
-            allowed: [0, 16, 17, 42, 43, 6, 12, 18, 19] // flat, turns, gentle transitions, banking starts
-        },
-        // Banking pieces
-        "left_bank": {
-            allowed: [32, 20, 22, 44] // continue left bank, left-bank-to-flat, banked turns
-        },
-        "right_bank": {
-            allowed: [33, 21, 23, 45] // continue right bank, right-bank-to-flat, banked turns
-        },
-        "flat_to_left_bank": {
-            allowed: [32, 20, 22, 44] // left bank, left-bank-to-flat, banked left turns
-        },
-        "flat_to_right_bank": {
-            allowed: [33, 21, 23, 45] // right bank, right-bank-to-flat, banked right turns
-        }
-    };
-
     // Track state storage (ride ID -> RideState)
     const rideTrackStates = new Map();
 
-    /**
-     * Get the track state category for validation rules
-     * Based on actual TrackElemType values from OpenRCT2
-     */
-    function getTrackStateCategory(trackType, isStation) {
-        // Map track types to state categories based on OpenRCT2 TrackElemType
-        switch(trackType) {
-            // Flat pieces
-            case 0:  // Flat
-                return "flat";
-                
-            // Station pieces - distinguish end station from begin/middle
-            case 1:  // EndStation
-                return "end_station";
-            case 2:  // BeginStation
-            case 3:  // MiddleStation
-                return "station";
-                
-            // Up slopes
-            case 4:  // Up25
-                return "up25";
-            case 5:  // Up60
-                return "up60";
-                
-            // Down slopes
-            case 10: // Down25
-                return "down25";
-            case 11: // Down60
-                return "down60";
-                
-            // Transitions
-            case 6:  // FlatToUp25 - ends at up25 angle
-                return "up25"; // After this transition, we're at 25° up
-            case 12: // FlatToDown25 - ends at down25 angle
-                return "down25"; // After this transition, we're at 25° down
-            case 9:  // Up25ToFlat
-            case 15: // Down25ToFlat
-                return "flat"; // These end flat
-                
-            case 7:  // Up25ToUp60 - ends in steep up
-                return "up60"; // This ends in Up60, not Up25!
-                
-            case 8:  // Up60ToUp25 - ends in gentle up
-                return "up25"; // This ends in Up25
-                
-            case 13: // Down25ToDown60 - ends in steep down
-                return "down60"; // This ends in Down60, not Down25!
-                
-            case 14: // Down60ToDown25 - ends in gentle down
-                return "down25"; // This ends in Down25
-                
-            // Turns
-            case 16: // LeftQuarterTurn5Tiles
-            case 17: // RightQuarterTurn5Tiles
-            case 42: // LeftQuarterTurn3Tiles
-            case 43: // RightQuarterTurn3Tiles
-                return "turn";
-                
-            // Banking pieces
-            case 18: // FlatToLeftBank
-                return "flat_to_left_bank";
-            case 19: // FlatToRightBank
-                return "flat_to_right_bank";
-            case 20: // LeftBankToFlat
-            case 21: // RightBankToFlat
-                return "flat"; // These end flat
-            case 32: // LeftBank
-                return "left_bank";
-            case 33: // RightBank
-                return "right_bank";
-            case 22: // BankedLeftQuarterTurn5Tiles
-            case 44: // LeftBankedQuarterTurn3Tiles
-                return "left_bank"; // Banked left turns maintain left bank
-            case 23: // BankedRightQuarterTurn5Tiles
-            case 45: // RightBankedQuarterTurn3Tiles
-                return "right_bank"; // Banked right turns maintain right bank
-                
-            default:
-                console.log("Unknown track type:", trackType, "- defaulting to flat");
-                return "flat"; // Default to flat for unknown pieces
-        }
+    function serializeTrackSegment(s) {
+        return {
+            type: s.type,
+            description: s.description,
+            trackGroup: s.trackGroup,
+            length: s.length,
+            beginZ: s.beginZ,
+            endZ: s.endZ,
+            beginSlope: s.beginSlope,
+            endSlope: s.endSlope,
+            beginBank: s.beginBank,
+            endBank: s.endBank,
+            beginDirection: s.beginDirection,
+            endDirection: s.endDirection,
+            turnDirection: s.turnDirection,
+            slopeDirection: s.slopeDirection,
+        };
     }
 
     const endpoints = new Map([
@@ -269,18 +155,7 @@ function main() {
     }
 
     async function handleGetAllTrackSegments() {
-        return context.getAllTrackSegments().map(seg => ({
-            type: seg.type,
-            description: seg.description,
-            trackGroup: seg.trackGroup,
-            length: seg.length,
-            beginZ: seg.beginZ,
-            endZ: seg.endZ,
-            beginDirection: seg.beginDirection,
-            endDirection: seg.endDirection,
-            beginBank: seg.beginBank,
-            endBank: seg.endBank,
-        }));
+        return context.getAllTrackSegments().map(serializeTrackSegment);
     }
 
     async function handleGetRideStats(params) {
@@ -353,37 +228,43 @@ function main() {
     async function handleGetValidNextPieces(params) {
         const { rideId } = params || {};
         if (typeof rideId !== "number") throw new Error("Missing or invalid parameter: rideId");
+        if (!map.getRide(rideId)) throw new Error(`Ride ${rideId} not found`);
+
         const state = rideTrackStates.get(rideId);
         if (!state || !state.history || state.history.length === 0) {
+            // Conservative fresh-start list: Flat, EndStation, BeginStation, MiddleStation.
+            // context.getAllTrackSegments() is not ride-type-filtered, so we cannot
+            // safely widen this without a dedicated upstream API.
+            const initialTypes = [0, 1, 2, 3];
+            const initialSegments = initialTypes
+                .map(t => context.getTrackSegment(t))
+                .filter(s => s)
+                .map(serializeTrackSegment);
             return {
-                validPieces: [0, 1, 2, 3],
+                validPieces: initialTypes,
+                validSegments: initialSegments,
                 lastTrackType: null,
-                stateCategory: "initial",
+                stateCategory: null,
+                position: null,
             };
         }
+
         const lastPiece = state.history[state.history.length - 1];
-        const stateCategory = getTrackStateCategory(lastPiece.trackType, false);
-        const rules = trackConnectionRules[stateCategory];
-        const position = {
-            x: lastPiece.nextX,
-            y: lastPiece.nextY,
-            z: lastPiece.nextZ,
-            direction: lastPiece.nextDirection,
-        };
-        if (!rules) {
-            console.log(`Warning: No rules for state category: ${stateCategory} track type: ${lastPiece.trackType}`);
-            return {
-                validPieces: [0, 16, 17, 42, 43],
-                lastTrackType: lastPiece.trackType,
-                stateCategory,
-                position,
-            };
-        }
+        const segment = context.getTrackSegment(lastPiece.trackType);
+        if (!segment) throw new Error(`Unknown track segment type: ${lastPiece.trackType}`);
+
+        const follows = segment.getNextValidSegments(rideId);
         return {
-            validPieces: rules.allowed,
+            validPieces: follows.map(s => s.type),
+            validSegments: follows.map(serializeTrackSegment),
             lastTrackType: lastPiece.trackType,
-            stateCategory,
-            position,
+            stateCategory: null,
+            position: {
+                x: lastPiece.nextX,
+                y: lastPiece.nextY,
+                z: lastPiece.nextZ,
+                direction: lastPiece.nextDirection,
+            },
         };
     }
 
@@ -439,42 +320,58 @@ function main() {
 
     // Search for the just-placed track element. First checks the central tile
     // with tolerance 8, then falls back to all 9 surrounding tiles (including
-    // the center) with tolerance 16. Returns { tile, element, elementIndex,
+    // the center) with tolerance 16. Matches on ride id AND the freshly
+    // requested trackType / direction / sequence===0 so we lock onto the
+    // newly placed origin tile rather than a stale neighbour element on
+    // dense or self-overlapping track. Returns { tile, element, elementIndex,
     // tileX, tileY } or null.
-    function findPlacedTrackElement(rideId, resultPosition) {
+    // OpenRCT2 stores all station segment types (BeginStation=2,
+    // MiddleStation=3, EndStation=1) as a single canonical station element
+    // type (1). Other track types are stored unchanged. We canonicalize both
+    // sides before comparing so a freshly placed BeginStation still matches.
+    function canonicalTrackType(t) {
+        return (t === 1 || t === 2 || t === 3) ? 1 : t;
+    }
+
+    function findPlacedTrackElement(rideId, trackType, direction, resultPosition) {
         const placedTileZ = resultPosition.z;
         const baseX = Math.floor(resultPosition.x / 32);
         const baseY = Math.floor(resultPosition.y / 32);
-
-        const centerTile = map.getTile(baseX, baseY);
-        if (centerTile) {
-            for (let i = 0; i < centerTile.numElements; i++) {
-                const elem = centerTile.elements[i];
-                if (elem.type === "track" && elem.ride === rideId
-                    && Math.abs(elem.baseZ - placedTileZ) <= 8) {
-                    return { tile: centerTile, element: elem, elementIndex: i, tileX: baseX, tileY: baseY };
-                }
-            }
-        }
+        const wantType = canonicalTrackType(trackType);
 
         const offsets = [
             [0, 0], [-1, 0], [1, 0], [0, -1], [0, 1],
             [-1, -1], [-1, 1], [1, -1], [1, 1],
         ];
-        for (const [dx, dy] of offsets) {
-            const tx = baseX + dx;
-            const ty = baseY + dy;
-            const tile = map.getTile(tx, ty);
-            if (!tile) continue;
-            for (let i = 0; i < tile.numElements; i++) {
-                const elem = tile.elements[i];
-                if (elem.type === "track" && elem.ride === rideId
-                    && Math.abs(elem.baseZ - placedTileZ) <= 16) {
-                    return { tile, element: elem, elementIndex: i, tileX: tx, tileY: ty };
+
+        function matches(elem, tolerance) {
+            if (elem.type !== "track" || elem.ride !== rideId) return false;
+            if (Math.abs(elem.baseZ - placedTileZ) > tolerance) return false;
+            if (canonicalTrackType(elem.trackType) !== wantType) return false;
+            if (elem.direction !== direction) return false;
+            // sequence may be undefined on older API versions; when present it
+            // must be 0 to lock onto the origin tile of a multi-tile piece.
+            if (typeof elem.sequence === "number" && elem.sequence !== 0) return false;
+            return true;
+        }
+
+        function scan(tolerance, onlyCenter) {
+            const list = onlyCenter ? [[0, 0]] : offsets;
+            for (const [dx, dy] of list) {
+                const tx = baseX + dx;
+                const ty = baseY + dy;
+                const tile = map.getTile(tx, ty);
+                if (!tile) continue;
+                for (let i = 0; i < tile.numElements; i++) {
+                    if (matches(tile.elements[i], tolerance)) {
+                        return { tile, element: tile.elements[i], elementIndex: i, tileX: tx, tileY: ty };
+                    }
                 }
             }
+            return null;
         }
-        return null;
+
+        return scan(8, true) || scan(16, false);
     }
 
     async function handlePlaceTrackPiece(params) {
@@ -486,6 +383,29 @@ function main() {
         if (!params) throw new Error("Missing parameters for placeTrackPiece");
         for (const key of requiredParams) {
             if (typeof params[key] === "undefined") throw new Error(`Missing parameter: ${key}`);
+        }
+
+        // Continuity check: a placement must chain off the previous piece's
+        // nextEndpoint. The trackplace action's z is the segment's base z,
+        // but nextEndpoint.z is the train's entry z (high edge for descending
+        // pieces). We translate via segment.beginZ (game units, 8 per tileZ)
+        // so the comparison is apples-to-apples.
+        const requestedSegment = context.getTrackSegment(params.trackType);
+        if (!requestedSegment) throw new Error(`Unknown trackType: ${params.trackType}`);
+        const requestedTrainEntryZ = params.tileCoordinateZ + (requestedSegment.beginZ / 8);
+        const existingState = rideTrackStates.get(params.ride);
+        if (existingState && existingState.history && existingState.history.length > 0) {
+            const last = existingState.history[existingState.history.length - 1];
+            if (params.tileCoordinateX !== last.nextX
+                || params.tileCoordinateY !== last.nextY
+                || requestedTrainEntryZ !== last.nextZ
+                || params.direction !== last.nextDirection) {
+                throw new Error(
+                    `Placement does not continue from previous piece: `
+                    + `train entry would be (${params.tileCoordinateX},${params.tileCoordinateY},${requestedTrainEntryZ}) dir=${params.direction}, `
+                    + `previous piece ends at (${last.nextX},${last.nextY},${last.nextZ}) dir=${last.nextDirection}`,
+                );
+            }
         }
 
         const pixelCoordinateX = params.tileCoordinateX * 32;
@@ -528,7 +448,7 @@ function main() {
             throw new Error("Tile not found at placed position");
         }
 
-        const placed = findPlacedTrackElement(params.ride, result.position);
+        const placed = findPlacedTrackElement(params.ride, params.trackType, params.direction, result.position);
         if (!placed) throw new Error("Could not find track element on any nearby tile");
         console.log(`Found track element at index: ${placed.elementIndex} on tile: ${placed.tileX} ${placed.tileY}`);
 
@@ -557,13 +477,17 @@ function main() {
             state = { history: [] };
             rideTrackStates.set(params.ride, state);
         }
-        // Record first piece's start position once, for circuit detection.
+        // Record first piece's canonical input position, for circuit detection.
+        // We use iterator.position (the placed segment's canonical input from
+        // the engine) rather than the raw request params so direction masking
+        // / coord normalization done by the engine can't cause subtle
+        // mismatches against future nextEndpoint comparisons.
         if (!state.firstPiece) {
             state.firstPiece = {
-                x: params.tileCoordinateX,
-                y: params.tileCoordinateY,
-                z: params.tileCoordinateZ,
-                direction: params.direction,
+                x: Math.round(iterator.position.x / 32),
+                y: Math.round(iterator.position.y / 32),
+                z: iterator.position.z / 8,
+                direction: iterator.position.direction,
             };
         }
 
@@ -710,7 +634,7 @@ registerPlugin({
     authors: ["Markus"],
     type: "intransient",
     licence: "MIT",
-    minApiVersion: 111,
-    targetApiVersion: 111,
+    minApiVersion: 114,
+    targetApiVersion: 114,
     main: main
 });

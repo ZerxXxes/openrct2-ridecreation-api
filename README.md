@@ -197,7 +197,14 @@ Places entrance and exit for a ride's station. Call this after placing all stati
 
 ### 4. getValidNextPieces
 
-Returns valid track pieces that can be placed at the current position based on track validation rules.
+Returns valid track pieces that can follow the most-recently-placed piece for the
+given ride. Backed by OpenRCT2's native `TrackSegment.getNextValidSegments(rideId)`
+(PR #25840), which is ride-type-aware — covered variants, steep-slope gates, and
+similar per-ride-def filters are applied automatically.
+
+If no piece has been placed yet for the ride, returns a conservative initial set
+(Flat, EndStation, BeginStation, MiddleStation) and `lastTrackType` / `position`
+as `null`.
 
 #### Request
 ```json
@@ -214,9 +221,24 @@ Returns valid track pieces that can be placed at the current position based on t
 {
     "success": true,
     "payload": {
-        "validPieces": [0, 6, 12, 16, 17, 42, 43],  // Valid track type IDs
-        "lastTrackType": 2,                         // Previously placed type
-        "stateCategory": "station",                 // Current state category
+        "validPieces": [0, 6, 12, 16, 17, 42, 43],   // Valid track type IDs
+        "validSegments": [                            // Same list with full segment data
+            {
+                "type": 0,
+                "description": "Flat",
+                "trackGroup": 0,
+                "length": 32,
+                "beginZ": 0, "endZ": 0,
+                "beginSlope": 0, "endSlope": 0,
+                "beginBank": 0, "endBank": 0,
+                "beginDirection": 0, "endDirection": 0,
+                "turnDirection": "straight",
+                "slopeDirection": "none"
+            }
+            // ... one entry per type in validPieces
+        ],
+        "lastTrackType": 2,                          // Previously placed type
+        "stateCategory": null,                       // Deprecated; always null
         "position": {
             "x": 66,
             "y": 66,
@@ -226,6 +248,9 @@ Returns valid track pieces that can be placed at the current position based on t
     }
 }
 ```
+
+`validPieces` is kept as a flat array of numeric type IDs for wire-compatibility
+with pre-migration clients. `validSegments` is the same list as rich objects.
 
 ### 5. getRideStats
 
@@ -397,15 +422,22 @@ Returns information about all available track segment types.
             "length": 1,
             "beginZ": 0,
             "endZ": 0,
+            "beginSlope": 0,
+            "endSlope": 0,
+            "beginBank": 0,
+            "endBank": 0,
             "beginDirection": 0,
             "endDirection": 0,
-            "beginBank": 0,
-            "endBank": 0
+            "turnDirection": "straight",
+            "slopeDirection": "none"
         }
         // ... more segments
     ]
 }
 ```
+
+Each entry comes from `serializeTrackSegment` — the same shape returned by
+`getValidNextPieces.validSegments`.
 
 ### 11. listLoadedRideObjects
 
