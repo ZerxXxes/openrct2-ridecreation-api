@@ -13,7 +13,7 @@ The plugin targets OpenRCT2 0.5.0+ (quickjs-ng scripting engine) and is written 
 ### Main components (`ridecreation-api.js`)
 
 1. **TCP server**
-   - Listens on port 8080 (or a random port in `[20000, 30000]` if `RANDOM_PORT` is set at the top of `main()`).
+   - Listens on port 8080. If 8080 is already in use, it probes upward (8081, 8082, ...) and binds the first free port, up to `MAX_PORT_ATTEMPTS` candidates. This lets multiple OpenRCT2 instances run concurrently, each on its own port. `server.listen()` throws synchronously on a busy port (native `bind()` fails with `EADDRINUSE`), so the bind loop catches and advances. The chosen port is logged to the console.
    - Newline-delimited JSON messages.
    - Connection handler buffers partial reads and dispatches each complete line through `processRequest()`.
 

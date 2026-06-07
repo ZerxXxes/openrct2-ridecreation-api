@@ -20,7 +20,7 @@ The Ride Creation API is a TCP-based JSON API that allows programmatic control o
 
 ### Connection Details
 - **Protocol**: TCP
-- **Port**: 8080 (configurable; set `RANDOM_PORT = true` at the top of `main()` in the plugin source to bind a random port in `[20000, 30000]`).
+- **Port**: 8080 by default. If 8080 is busy, the server automatically probes upward (8081, 8082, ...) and binds the first free port, so multiple OpenRCT2 instances can run side by side — each takes the next available port. The chosen port is printed to the in-game console at startup. Tune `DEFAULT_PORT` / `MAX_PORT_ATTEMPTS` at the top of `main()` in the plugin source.
 - **Host**: localhost
 - **Message Format**: JSON with newline delimiter
 

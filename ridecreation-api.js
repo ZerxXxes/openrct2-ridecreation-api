@@ -2,16 +2,8 @@ function main() {
     "use strict";
 
     // Configuration flags - Edit these to change behavior
-    const RANDOM_PORT = false;  // Set to true to use a random port instead of 8080
-    const RANDOM_PORT_MIN = 20000;  // Minimum port when using random selection
-    const RANDOM_PORT_MAX = 30000;  // Maximum port when using random selection
-
-    // Select port based on configuration
-    let port = 8080;
-    if (RANDOM_PORT) {
-        port = Math.floor(Math.random() * (RANDOM_PORT_MAX - RANDOM_PORT_MIN + 1)) + RANDOM_PORT_MIN;
-        console.log(`Random port mode enabled - selected port ${port}`);
-    }
+    const DEFAULT_PORT = 8080;        // Preferred port; the server probes upward from here.
+    const MAX_PORT_ATTEMPTS = 100;    // Probe DEFAULT_PORT .. DEFAULT_PORT + MAX_PORT_ATTEMPTS - 1.
 
     // Create TCP listener
     const server = network.createListener();
@@ -55,8 +47,26 @@ function main() {
         });
     });
 
-    // Bind to the selected port
-    server.listen(port);
+    // Bind to the first available port at or above DEFAULT_PORT. This lets
+    // several OpenRCT2 instances run concurrently — each grabs the next free
+    // port (8080, 8081, 8082, ...). server.listen() throws synchronously when
+    // the port is already in use (the native socket's bind() fails with
+    // EADDRINUSE), so we catch and advance to the next candidate.
+    let port = null;
+    for (let candidate = DEFAULT_PORT; candidate < DEFAULT_PORT + MAX_PORT_ATTEMPTS; candidate++) {
+        try {
+            server.listen(candidate);
+            port = candidate;
+            break;
+        } catch (e) {
+            console.log(`Port ${candidate} unavailable (${e}); trying next port.`);
+        }
+    }
+
+    if (port === null) {
+        console.log(`Ride API server failed to bind a port in range ${DEFAULT_PORT}-${DEFAULT_PORT + MAX_PORT_ATTEMPTS - 1}.`);
+        return;
+    }
     console.log(`Ride API server listening on port ${port}.`);
 
     // Promise-wrapped context.executeAction. Rejects on result.error so
