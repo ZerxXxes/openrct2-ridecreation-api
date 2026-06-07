@@ -113,6 +113,27 @@ function main() {
         };
     }
 
+    // Valid follow-on pieces for a placed piece. Shared by getValidNextPieces
+    // and placeTrackPiece so their wire shapes can't drift. Backed by the
+    // native ride-type-aware segment.getNextValidSegments(rideId).
+    function computeValidNextPieces(rideId, lastPiece) {
+        const segment = context.getTrackSegment(lastPiece.trackType);
+        if (!segment) throw new Error(`Unknown track segment type: ${lastPiece.trackType}`);
+        const follows = segment.getNextValidSegments(rideId);
+        return {
+            validPieces: follows.map(s => s.type),
+            validSegments: follows.map(serializeTrackSegment),
+            lastTrackType: lastPiece.trackType,
+            stateCategory: null,
+            position: {
+                x: lastPiece.nextX,
+                y: lastPiece.nextY,
+                z: lastPiece.nextZ,
+                direction: lastPiece.nextDirection,
+            },
+        };
+    }
+
     const endpoints = new Map([
         ["listAllRides",         () => handleListAllRides()],
         ["getAllTrackSegments",  () => handleGetAllTrackSegments()],
@@ -260,22 +281,7 @@ function main() {
         }
 
         const lastPiece = state.history[state.history.length - 1];
-        const segment = context.getTrackSegment(lastPiece.trackType);
-        if (!segment) throw new Error(`Unknown track segment type: ${lastPiece.trackType}`);
-
-        const follows = segment.getNextValidSegments(rideId);
-        return {
-            validPieces: follows.map(s => s.type),
-            validSegments: follows.map(serializeTrackSegment),
-            lastTrackType: lastPiece.trackType,
-            stateCategory: null,
-            position: {
-                x: lastPiece.nextX,
-                y: lastPiece.nextY,
-                z: lastPiece.nextZ,
-                direction: lastPiece.nextDirection,
-            },
-        };
+        return computeValidNextPieces(rideId, lastPiece);
     }
 
     async function handleDeleteLastTrackPiece(params) {
@@ -542,6 +548,11 @@ function main() {
                 elemDirection: placed.element.direction,
             },
         };
+        // Fold the valid follow-on pieces into the place response so clients can
+        // chain construction without a separate getValidNextPieces round-trip.
+        // The just-placed piece is the new history tail.
+        const justPlaced = state.history[state.history.length - 1];
+        responsePayload.validNextPieces = computeValidNextPieces(params.ride, justPlaced);
         if (isStationPiece) responsePayload.stationDetected = true;
         return responsePayload;
     }

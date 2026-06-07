@@ -42,7 +42,7 @@ The plugin targets OpenRCT2 0.5.0+ (quickjs-ng scripting engine) and is written 
 Registered in the `endpoints` Map. Each handler is `async`; throws → `{success: false, error}`; returns → `{success: true, payload}`.
 
 - `createRide` — create a new ride. Now requires `inspectionInterval` (defaulted to 2 = `every30Minutes` if the client doesn't pass it; OpenRCT2 0.5.0's strict parameter visitor errors on missing fields).
-- `placeTrackPiece` — place a track piece; records to history and updates circuit-detection state.
+- `placeTrackPiece` — place a track piece; records to history and updates circuit-detection state. The response also includes a `validNextPieces` object mirroring the `getValidNextPieces` payload (computed via the shared `computeValidNextPieces` helper), so clients can chain construction without a separate `getValidNextPieces` round-trip.
 - `placeEntranceExit` — scan station pieces, place entrance and exit on perpendicular sides; tries each station in turn until both succeed.
 - `deleteLastTrackPiece` — pop the last placed piece; resets `firstPiece` and `isComplete` when history empties.
 - `getValidNextPieces` — return the valid follow-on track pieces for the most-recently-placed piece (or the conservative initial set if history is empty). Backed by native `segment.getNextValidSegments(rideId)`; response includes both `validPieces` (numeric type IDs, wire-compatible with pre-migration clients) and `validSegments` (rich segment objects via `serializeTrackSegment`). `stateCategory` is retained as a key but is always `null` (the local classification no longer exists).
