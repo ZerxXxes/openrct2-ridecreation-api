@@ -140,12 +140,15 @@ function main() {
         ["deleteAllRides",       () => handleDeleteAllRides()],
         ["startRideTest",        params => handleStartRideTest(params)],
         ["getRideStats",         params => handleGetRideStats(params)],
+        ["getRideMeasurements",  params => handleGetRideMeasurements(params)],
         ["placeTrackPiece",      params => handlePlaceTrackPiece(params)],
         ["getValidNextPieces",   params => handleGetValidNextPieces(params)],
         ["placeEntranceExit",    params => handlePlaceEntranceExit(params)],
         ["deleteLastTrackPiece", params => handleDeleteLastTrackPiece(params)],
         ["createRide",           params => handleCreateRide(params)],
+        ["resetEpisode",         params => handleResetEpisode(params)],
         ["listLoadedRideObjects", () => handleListLoadedRideObjects()],
+        ["setGameSpeed",         params => handleSetGameSpeed(params)],
     ]);
 
     /**
@@ -165,6 +168,17 @@ function main() {
             return;
         }
         runHandler(handler(request.params), callback);
+    }
+
+    /**
+     * Sets the game simulation speed via the built-in "gamesetspeed" action.
+     * Ride ratings need ~35s of SIM time on a small circuit; the RL trainer requests
+     * speed 8 so ride tests resolve in ~4-5s of wall clock. speed: 1..4, or 8 (hyper).
+     */
+    async function handleSetGameSpeed(params) {
+        const speed = params && params.speed ? Number(params.speed) : 1;
+        context.executeAction("gamesetspeed", { speed: speed }, () => {});
+        return { speed: speed };
     }
 
     async function handleListAllRides() {
@@ -198,6 +212,35 @@ function main() {
             excitement: ride.excitement / 100,
             intensity: ride.intensity / 100,
             nausea: ride.nausea / 100,
+        };
+    }
+
+    /**
+     * Test-run measurements for the RL reward's rating-cap ramps. All values come from
+     * the scripting bindings' registered Ride properties (already unit-converted there:
+     * speeds in display mph, rideLength in metres, G's in g, totalAirTime in seconds,
+     * highestDropHeight in raw z-steps). Turn counts and shelteredLength are NOT
+     * registered on ScRide, hence absent here (env-side static counters cover turns).
+     */
+    async function handleGetRideMeasurements(params) {
+        const { rideId } = params || {};
+        if (typeof rideId !== "number") throw new Error("Missing or invalid parameter: rideId");
+        const ride = map.getRide(rideId);
+        if (!ride) throw new Error("Ride not found");
+        return {
+            excitement: ride.excitement / 100,
+            intensity: ride.intensity / 100,
+            nausea: ride.nausea / 100,
+            maxSpeed: ride.maxSpeed,
+            averageSpeed: ride.averageSpeed,
+            rideTime: ride.rideTime,
+            rideLength: ride.rideLength,
+            maxPositiveVerticalGs: ride.maxPositiveVerticalGs,
+            maxNegativeVerticalGs: ride.maxNegativeVerticalGs,
+            maxLateralGs: ride.maxLateralGs,
+            totalAirTime: ride.totalAirTime,
+            numDrops: ride.numDrops,
+            highestDropHeight: ride.highestDropHeight,
         };
     }
 
@@ -238,6 +281,66 @@ function main() {
         rideTrackStates.set(result.ride, { history: [] });
         console.log(`Initialized fresh track state for ride ${result.ride}`);
         return { rideId: result.ride };
+    }
+
+    // One-round-trip episode reset: clean slate + fresh ride + full station build, returning the
+    // post-station head and the valid follow-on pieces. The station is built by calling
+    // handlePlaceTrackPiece per piece -- the SAME path the client used for its N separate calls --
+    // so state.history, state.firstPiece, isComplete and validNextPieces are recorded identically
+    // (keeping getValidNextPieces, deleteLastTrackPiece and circuit-completion correct). This just
+    // moves the per-piece loop from the client (N network round-trips) to the server (one).
+    async function handleResetEpisode(params) {
+        const p = params || {};
+        const stationLength = (typeof p.stationLength === "number" && p.stationLength > 0) ? p.stationLength : 6;
+        const startX = (typeof p.startX === "number") ? p.startX : 61;
+        const startY = (typeof p.startY === "number") ? p.startY : 66;
+        const startZ = (typeof p.startZ === "number") ? p.startZ : 14;
+        const startDir = (typeof p.startDir === "number") ? p.startDir : 0;
+        const rideType = (typeof p.rideType === "number") ? p.rideType : 52;
+
+        // 1) Clean slate (also clears rideTrackStates for the demolished rides).
+        await handleDeleteAllRides();
+
+        // 2) Fresh ride.
+        const created = await handleCreateRide({
+            rideType: rideType,
+            rideObject: 0,
+            entranceObject: 0,
+            colour1: 0,
+            colour2: 1,
+        });
+        const rideId = created.rideId;
+
+        // 3) Build the station through the normal placeTrackPiece path, chaining each piece off
+        //    the previous nextEndpoint exactly as the legacy client did.
+        let curX = startX, curY = startY, curZ = startZ, curDir = startDir;
+        let lastPlaced = null;
+        for (let i = 0; i < stationLength; i++) {
+            const trackType = (i === 0) ? 2 : (i === stationLength - 1) ? 1 : 3; // Begin / Middle / End
+            lastPlaced = await handlePlaceTrackPiece({
+                tileCoordinateX: curX,
+                tileCoordinateY: curY,
+                tileCoordinateZ: curZ,
+                direction: curDir,
+                ride: rideId,
+                trackType: trackType,
+                rideType: rideType,
+                brakeSpeed: 0,
+                colour: 0,
+                seatRotation: 0,
+                trackPlaceFlags: 0,
+                isFromTrackDesign: true,
+                hasChainLift: false,
+            });
+            const ep = lastPlaced.nextEndpoint;
+            curX = ep.x; curY = ep.y; curZ = ep.z; curDir = ep.direction;
+        }
+
+        return {
+            rideId: rideId,
+            finalEndpoint: { x: curX, y: curY, z: curZ, direction: curDir },
+            validNextPieces: lastPlaced ? lastPlaced.validNextPieces : null,
+        };
     }
 
     async function handleDeleteAllRides() {
@@ -330,6 +433,24 @@ function main() {
                 direction: newLast.nextDirection,
             };
             response.lastTrackType = newLast.trackType;
+            // Fold valid follow-on pieces into the delete response (mirrors placeTrackPiece) so the
+            // client keeps its valid-piece cache warm and skips a getValidNextPieces round-trip
+            // after every remove.
+            response.validNextPieces = computeValidNextPieces(rideId, newLast);
+        } else {
+            // No pieces left: hand back the same conservative fresh-start list as
+            // getValidNextPieces' empty-history branch, so the cache still stays warm.
+            const initialTypes = [0, 1, 2, 3];
+            response.validNextPieces = {
+                validPieces: initialTypes,
+                validSegments: initialTypes
+                    .map(t => context.getTrackSegment(t))
+                    .filter(s => s)
+                    .map(serializeTrackSegment),
+                lastTrackType: null,
+                stateCategory: null,
+                position: null,
+            };
         }
         return response;
     }
@@ -651,7 +772,7 @@ function main() {
 // Register the plugin
 registerPlugin({
     name: "Ride Creation API Plugin",
-    version: "0.2",
+    version: "0.3",
     authors: ["Markus"],
     type: "intransient",
     licence: "MIT",
