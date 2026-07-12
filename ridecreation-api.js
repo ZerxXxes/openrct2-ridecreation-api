@@ -141,6 +141,7 @@ function main() {
         ["startRideTest",        params => handleStartRideTest(params)],
         ["getRideStats",         params => handleGetRideStats(params)],
         ["getRideMeasurements",  params => handleGetRideMeasurements(params)],
+        ["setRideVehicles",      params => handleSetRideVehicles(params)],
         ["placeTrackPiece",      params => handlePlaceTrackPiece(params)],
         ["getValidNextPieces",   params => handleGetValidNextPieces(params)],
         ["placeEntranceExit",    params => handlePlaceEntranceExit(params)],
@@ -242,6 +243,26 @@ function main() {
             numDrops: ride.numDrops,
             highestDropHeight: ride.highestDropHeight,
         };
+    }
+
+    /**
+     * Sets the test train's consist via the built-in "ridesetvehicle" action.
+     * type: 0 = number of trains, 1 = cars per train. The rating's BonusTrainLength
+     * pays excitement per extra car, the largest track-independent term left once
+     * template geometry saturates (measured E ceiling ~5.86 on Jul-12).
+     */
+    async function handleSetRideVehicles(params) {
+        const { rideId, numCarsPerTrain, numTrains } = params || {};
+        if (typeof rideId !== "number") throw new Error("Missing or invalid parameter: rideId");
+        if (typeof numCarsPerTrain === "number") {
+            await executeAction("ridesetvehicle", { ride: rideId, type: 1, value: numCarsPerTrain });
+        }
+        if (typeof numTrains === "number") {
+            await executeAction("ridesetvehicle", { ride: rideId, type: 0, value: numTrains });
+        }
+        const ride = map.getRide(rideId);
+        return { rideId: rideId, applied: true,
+                 vehicles: ride && ride.vehicles ? ride.vehicles.length : null };
     }
 
     async function handleStartRideTest(params) {
@@ -772,7 +793,7 @@ function main() {
 // Register the plugin
 registerPlugin({
     name: "Ride Creation API Plugin",
-    version: "0.3",
+    version: "0.4",
     authors: ["Markus"],
     type: "intransient",
     licence: "MIT",
