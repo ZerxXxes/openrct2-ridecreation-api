@@ -150,6 +150,9 @@ function main() {
         ["resetEpisode",         params => handleResetEpisode(params)],
         ["listLoadedRideObjects", () => handleListLoadedRideObjects()],
         ["setGameSpeed",         params => handleSetGameSpeed(params)],
+        // Sim-liveness diagnostic: ticks advance ~40/s when the sim runs; frozen
+        // ticks mean a paused/never-started park (headless triage, Jul-31).
+        ["getTick",              async () => ({ ticks: date.ticksElapsed, monthProgress: date.monthProgress })],
     ]);
 
     /**
@@ -323,9 +326,13 @@ function main() {
         await handleDeleteAllRides();
 
         // 2) Fresh ride.
+        // rideObject is an INDEX into the loaded-object list and scan order is
+        // machine-dependent (on one host index 0 was a Balloon Stall: rides built
+        // but no train could dispatch, so nothing ever rated). The client resolves
+        // the right index via listLoadedRideObjects and passes it here.
         const created = await handleCreateRide({
             rideType: rideType,
-            rideObject: 0,
+            rideObject: (typeof p.rideObject === "number") ? p.rideObject : 0,
             entranceObject: 0,
             colour1: 0,
             colour2: 1,
@@ -793,7 +800,7 @@ function main() {
 // Register the plugin
 registerPlugin({
     name: "Ride Creation API Plugin",
-    version: "0.4",
+    version: "0.5",
     authors: ["Markus"],
     type: "intransient",
     licence: "MIT",
