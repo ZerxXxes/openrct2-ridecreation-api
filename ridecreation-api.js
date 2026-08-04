@@ -153,6 +153,13 @@ function main() {
         // Sim-liveness diagnostic: ticks advance ~40/s when the sim runs; frozen
         // ticks mean a paused/never-started park (headless triage, Jul-31).
         ["getTick",              async () => ({ ticks: date.ticksElapsed, monthProgress: date.monthProgress })],
+        // Ops bridge: run an in-game console command (e.g. "save_park name") over
+        // HTTP -- the stdin REPL needs a TTY that headless/nohup setups lack.
+        ["execLegacy",           async params => {
+            if (!params || typeof params.command !== "string") throw new Error("Missing parameter: command");
+            console.executeLegacy(params.command);
+            return { executed: params.command };
+        }],
     ]);
 
     /**
