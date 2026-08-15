@@ -160,6 +160,7 @@ function main() {
             console.executeLegacy(params.command);
             return { executed: params.command };
         }],
+        ["captureImage",         params => handleCaptureImage(params)],
     ]);
 
     /**
@@ -190,6 +191,64 @@ function main() {
         const speed = params && params.speed ? Number(params.speed) : 1;
         context.executeAction("gamesetspeed", { speed: speed }, () => {});
         return { speed: speed };
+    }
+
+    /**
+     * Renders the current map to a screenshot file via context.captureImage().
+     * The 114 scripting API has no park-save function, headless instances have
+     * no writable stdin, and this plugin speaks raw TCP JSON rather than HTTP --
+     * so there is no other way to see what a headless instance built. This is
+     * the escape hatch a human uses to inspect an agent's gallery park.
+     *
+     * COORDINATE-UNIT DECISION: `tileX`/`tileY` here are TILE coordinates, the
+     * same units every other endpoint in this file takes (e.g.
+     * placeTrackPiece's tileCoordinateX/Y) -- NOT the map units
+     * CaptureOptions.position expects natively (32 map units per tile; see
+     * CoordsXY in openrct2.d.ts). We convert by *32 below so callers use one
+     * consistent unit across the whole API; a silent factor-of-32 miss would
+     * centre the shot on empty land and look like a broken feature rather than
+     * a units bug.
+     *
+     * `zoom` and `rotation` are both REQUIRED by the native binding
+     * (ScContext::captureImage throws "Invalid options." if either is missing,
+     * matching openrct2.d.ts where neither field carries a `?`) -- both are
+     * defaulted below so an omission never reaches the engine as undefined.
+     * The same native binding also only honours `position` when `width` and
+     * `height` are supplied alongside it (position without both throws
+     * "Invalid options." there too), so that pairing is validated here for a
+     * clearer error than the engine gives.
+     */
+    async function handleCaptureImage(params) {
+        const p = params || {};
+
+        const options = {
+            zoom: typeof p.zoom === "number" ? p.zoom : 0, // 0 = 1:1
+            rotation: typeof p.rotation === "number" ? p.rotation : 0,
+        };
+        if (typeof p.transparent === "boolean") options.transparent = p.transparent;
+
+        if (typeof p.tileX === "number" && typeof p.tileY === "number") {
+            if (typeof p.width !== "number" || typeof p.height !== "number") {
+                throw new Error("captureImage: width and height are required together with tileX/tileY");
+            }
+            options.width = p.width;
+            options.height = p.height;
+            options.position = { x: p.tileX * 32, y: p.tileY * 32 }; // tiles -> map units
+        }
+
+        // Always pick the filename ourselves (rather than relying on the
+        // engine's own auto-naming) so the response can tell the caller
+        // exactly which file to look for.
+        options.filename = (typeof p.filename === "string" && p.filename)
+            ? p.filename
+            : `capture_${Date.now()}.png`;
+
+        try {
+            context.captureImage(options);
+        } catch (e) {
+            throw new Error(`Failed to capture image: ${e.message}`);
+        }
+        return { filename: options.filename };
     }
 
     async function handleListAllRides() {
@@ -807,7 +866,7 @@ function main() {
 // Register the plugin
 registerPlugin({
     name: "Ride Creation API Plugin",
-    version: "0.5",
+    version: "0.6",
     authors: ["Markus"],
     type: "intransient",
     licence: "MIT",
